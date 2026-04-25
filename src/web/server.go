@@ -704,7 +704,7 @@ var errRunAlreadyStarted = errors.New("run already in progress")
 
 // handleRun starts an explo run in the background. Clients follow output via /api/run/events.
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		http.Error(w, "bad form data", http.StatusBadRequest)
 		return
 	}
