@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -365,6 +366,32 @@ func getPlexSong(track *models.Track, searchResults PlexSearch) (string, error) 
 
 	slog.Debug(fmt.Sprintf("full search result: %v", searchResults.MediaContainer.SearchResult))
 	return "", fmt.Errorf("failed to find '%s' by '%s' in '%s'", track.Title, track.Artist, track.Album)
+}
+
+// UploadArtwork uploads a PNG as the playlist poster via the Plex API.
+func (c *Plex) UploadArtwork(data []byte) error {
+	if c.Cfg.PlaylistID == "" {
+		return fmt.Errorf("no playlist ID to upload artwork to")
+	}
+	url := fmt.Sprintf("%s/library/metadata/%s/posters", c.Cfg.URL, c.Cfg.PlaylistID)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "image/png")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", c.Cfg.Creds.APIKey)
+	req.Header.Set("X-Plex-Client-Identifier", c.Cfg.ClientID)
+
+	resp, err := c.HttpClient.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("plex artwork upload got %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (c *Plex) addtoPlaylist(tracks []*models.Track) {

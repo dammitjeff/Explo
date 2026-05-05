@@ -1,0 +1,9 @@
+{
+  "name": "explo-cover-gen",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.0"
+  }
+}

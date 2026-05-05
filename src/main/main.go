@@ -1,15 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
-	"explo/src/logging"
-	"explo/src/models"
-	"explo/src/web"
 	"io"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -17,7 +16,10 @@ import (
 	"explo/src/config"
 	"explo/src/discovery"
 	"explo/src/downloader"
+	"explo/src/logging"
+	"explo/src/models"
 	"explo/src/util"
+	"explo/src/web"
 )
 
 type Song struct {
@@ -103,6 +105,71 @@ func setup(cfg *config.Config) {
 	cfg.GenPlaylistName()
 }
 
+// coverScriptPath returns the path to generate-cover.js, checking CWD then executable dir.
+func coverScriptPath() string {
+	const rel = "scripts/generate-cover.js"
+	if _, err := os.Stat(rel); err == nil {
+		return rel
+	}
+	if exe, err := os.Executable(); err == nil {
+		if p := filepath.Join(filepath.Dir(exe), rel); func() bool { _, e := os.Stat(p); return e == nil }() {
+			return p
+		}
+	}
+	return rel
+}
+
+func generateAndUploadArtwork(mc *client.Client, cfgPath, playlistType string, tracks []*models.Track) {
+	coversDir := filepath.Join(filepath.Dir(cfgPath), "cache", "covers")
+	var coverPaths []string
+	var artists []string
+	seen := map[string]bool{}
+	for _, t := range tracks {
+		if t.CoverURL != "" {
+			parts := strings.Split(strings.TrimRight(t.CoverURL, "/"), "/")
+			mbid := parts[len(parts)-2]
+			localPath := filepath.Join(coversDir, mbid+".jpg")
+			if _, err := os.Stat(localPath); err == nil {
+				coverPaths = append(coverPaths, localPath)
+			}
+		}
+		if !seen[t.MainArtist] && t.MainArtist != "" {
+			seen[t.MainArtist] = true
+			artists = append(artists, t.MainArtist)
+		}
+	}
+	if len(artists) > 3 {
+		artists = artists[:3]
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"playlistType": playlistType,
+		"artists":      artists,
+		"coverUrls":    coverPaths,
+	})
+	cmd := exec.Command("node", coverScriptPath())
+	cmd.Stdin = bytes.NewReader(payload)
+	png, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			slog.Warn("failed to generate playlist artwork", "err", string(ee.Stderr))
+		} else {
+			slog.Warn("failed to generate playlist artwork", "err", err)
+		}
+		return
+	}
+
+	plexClient, ok := mc.API.(*client.Plex)
+	if !ok {
+		return
+	}
+	if err := plexClient.UploadArtwork(png); err != nil {
+		slog.Warn("failed to upload playlist artwork", "err", err)
+		return
+	}
+	slog.Info("playlist artwork uploaded")
+}
+
 func main() {
 	if os.Getenv("WEB_UI") == "true" {
 		cfgPath := os.Getenv("WEB_CFG_PATH")
@@ -139,7 +206,7 @@ func main() {
 	}
 	allTracks := append([]*models.Track(nil), tracks...)
 
-	client, err := client.NewClient(&cfg)
+	mc, err := client.NewClient(&cfg)
 	if err != nil {
 		slog.Error(err.Error(), "notify", true)
 		os.Exit(1)
@@ -150,7 +217,7 @@ func main() {
 		os.Exit(1)
 	}
 	if !cfg.Persist {
-		err := client.DeletePlaylist()
+		err := mc.DeletePlaylist()
 		if err != nil {
 			slog.Warn(err.Error(), "notify", true)
 		}
@@ -159,7 +226,7 @@ func main() {
 		}
 	}
 	if cfg.Flags.DownloadMode != "force" {
-		if err := client.CheckTracks(tracks); err != nil { // Check if tracks exist on system before downloading
+		if err := mc.CheckTracks(tracks); err != nil { // Check if tracks exist on system before downloading
 			slog.Warn(err.Error(), "notify", true)
 		}
 	}
@@ -178,9 +245,10 @@ func main() {
 	}
 	writePlaylistCache(cfg.Flags.CfgPath, cfg.Flags.Playlist, allTracks, added)
 
-	if err := client.CreatePlaylist(tracks); err != nil {
+	if err := mc.CreatePlaylist(tracks); err != nil {
 		slog.Warn(err.Error())
 	} else {
 		slog.Info("playlist created successfully", "system", cfg.System, "playlistName", cfg.ClientCfg.PlaylistName, "notify", true)
+		generateAndUploadArtwork(mc, cfg.Flags.CfgPath, cfg.Flags.Playlist, allTracks)
 	}
 }

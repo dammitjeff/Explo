@@ -29,7 +29,9 @@ RUN apk add --no-cache \
     yt-dlp \
     tzdata \
     shadow \
-    su-exec 
+    su-exec \
+    nodejs \
+    npm
 
 # Install ytmusicapi in the container
 RUN pip install --no-cache-dir ytmusicapi
@@ -37,10 +39,12 @@ RUN pip install --no-cache-dir ytmusicapi
 # Set working directory
 WORKDIR /opt/explo/
 
-# Copy entrypoint, binary, python helper
+# Copy entrypoint, binary, python helper, cover generator
 COPY ./docker/start.sh /start.sh
 COPY --from=builder /app/explo .
 COPY src/downloader/youtube_music/search_ytmusic.py .
+COPY scripts/ ./scripts/
+RUN cd scripts && npm ci
 
 
 RUN chmod +x /start.sh ./explo
