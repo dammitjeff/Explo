@@ -44,6 +44,7 @@ const PLAYLISTS = [
   { value: 'weekly-exploration', name: 'Weekly Exploration', desc: '~50 tracks · refreshes every Tuesday' },
   { value: 'weekly-jams',        name: 'Weekly Jams',        desc: '~25 tracks · refreshes every Monday' },
   { value: 'daily-jams',         name: 'Daily Jams',         desc: '~25 tracks · refreshes daily' },
+  { value: 'fresh-releases',      name: 'Fresh Releases',     desc: '25 tracks · recent releases from artists you listen to' },
 ]
 
 function Step1({ fields, setField, envSources, onNext, saving }) {
@@ -391,6 +392,7 @@ export default function Wizard({ config, envSources, onComplete }) {
         'weekly-exploration': !!config.WEEKLY_EXPLORATION_SCHEDULE,
         'weekly-jams':        !!config.WEEKLY_JAMS_SCHEDULE,
         'daily-jams':         !!config.DAILY_JAMS_SCHEDULE,
+        'fresh-releases':     !!config.FRESH_RELEASES_SCHEDULE,
       },
       // Step 2
       system:           config.EXPLO_SYSTEM || '',

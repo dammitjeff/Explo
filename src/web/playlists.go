@@ -2,6 +2,9 @@ package web
 
 import (
 	"encoding/json"
+	appcfg "explo/src/config"
+	"explo/src/discovery"
+	"explo/src/util"
 	"fmt"
 	"io"
 	"net/http"
@@ -56,6 +59,8 @@ func (s *Server) handleGetPlaylist(w http.ResponseWriter, r *http.Request) {
 
 	if playlistType == "on-repeat" {
 		tracks, err = fetchTopRecordingsLB(username)
+	} else if playlistType == "fresh-releases" {
+		tracks, err = fetchFreshReleaseTracks(username)
 	} else {
 		tracks, generatedAt, err = fetchMostRecentLBPlaylist(username, playlistType)
 	}
@@ -116,9 +121,9 @@ type lbCreatedForResp struct {
 type lbPlaylistResp struct {
 	Playlist struct {
 		Track []struct {
-			Title   string `json:"title"`
-			Creator string `json:"creator"`
-			Album   string `json:"album"`
+			Title     string `json:"title"`
+			Creator   string `json:"creator"`
+			Album     string `json:"album"`
 			Extension struct {
 				JspfTrack struct {
 					AdditionalMetadata struct {
@@ -159,6 +164,27 @@ func fetchTopRecordingsLB(username string) ([][4]string, error) {
 			cover = fmt.Sprintf("https://coverartarchive.org/release/%s/front-250", r.ReleaseMbid)
 		}
 		out = append(out, [4]string{r.TrackName, r.ArtistName, r.ReleaseName, cover})
+	}
+	return out, nil
+}
+
+func fetchFreshReleaseTracks(username string) ([][4]string, error) {
+	lb := discovery.NewListenBrainz(appcfg.DiscoveryConfig{
+		Listenbrainz: appcfg.Listenbrainz{
+			User:           username,
+			ImportPlaylist: "fresh-releases",
+			SingleArtist:   true,
+		},
+	}, util.NewHttp(util.HttpClientConfig{Timeout: 10}))
+
+	tracks, err := lb.QueryTracks()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([][4]string, 0, len(tracks))
+	for _, track := range tracks {
+		out = append(out, [4]string{track.CleanTitle, track.Artist, track.Album, track.CoverURL})
 	}
 	return out, nil
 }

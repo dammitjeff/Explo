@@ -70,9 +70,10 @@ type playlistDef struct {
 
 var playlistDefs = map[string]playlistDef{
 	"weekly-exploration": {"WEEKLY_EXPLORATION", "15 00 * * 2", "--playlist weekly-exploration"},
-	"weekly-jams":        {"WEEKLY_JAMS",        "30 00 * * 1", "--playlist weekly-jams"},
-	"daily-jams":         {"DAILY_JAMS",         "15 01 * * *", "--playlist daily-jams"},
-	"on-repeat":          {"ON_REPEAT",          "0 12 1 * *",  "--playlist on-repeat"},
+	"weekly-jams":        {"WEEKLY_JAMS", "30 00 * * 1", "--playlist weekly-jams"},
+	"daily-jams":         {"DAILY_JAMS", "15 01 * * *", "--playlist daily-jams"},
+	"on-repeat":          {"ON_REPEAT", "0 12 1 * *", "--playlist on-repeat"},
+	"fresh-releases":     {"FRESH_RELEASES", "0 02 * * 5", "--playlist fresh-releases"},
 }
 
 // allConfigKeys is the complete set of env keys the web UI reads and writes.
@@ -82,6 +83,7 @@ var allConfigKeys = []string{
 	"WEEKLY_JAMS_SCHEDULE", "WEEKLY_JAMS_FLAGS",
 	"DAILY_JAMS_SCHEDULE", "DAILY_JAMS_FLAGS",
 	"ON_REPEAT_SCHEDULE", "ON_REPEAT_FLAGS",
+	"FRESH_RELEASES_SCHEDULE", "FRESH_RELEASES_FLAGS",
 	"EXPLO_SYSTEM", "SYSTEM_URL", "API_KEY", "LIBRARY_NAME",
 	"SYSTEM_USERNAME", "SYSTEM_PASSWORD", "PLAYLIST_DIR", "SLEEP", "PUBLIC_PLAYLIST",
 	"DOWNLOAD_DIR", "USE_SUBDIRECTORY",

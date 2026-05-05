@@ -3,6 +3,7 @@ package discovery
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -123,6 +124,18 @@ type TopRecordings struct {
 	} `json:"payload"`
 }
 
+type FreshReleases struct {
+	Payload struct {
+		Releases []struct {
+			Artist string `json:"artist_credit_name"`
+			Group  string `json:"release_group_mbid"`
+			Type   string `json:"release_group_primary_type"`
+			MBID   string `json:"release_mbid"`
+			Name   string `json:"release_name"`
+		} `json:"releases"`
+	} `json:"payload"`
+}
+
 type ListenBrainz struct {
 	HttpClient *util.HttpClient
 	cfg        cfg.Listenbrainz
@@ -139,6 +152,9 @@ func (c *ListenBrainz) QueryTracks() ([]*models.Track, error) {
 	// Stats-based playlists bypass the discovery mode switch
 	if c.cfg.ImportPlaylist == "on-repeat" {
 		return c.getTopRecordings(c.cfg.User)
+	}
+	if c.cfg.ImportPlaylist == "fresh-releases" {
+		return c.getFreshReleaseTracks(c.cfg.User, c.cfg.SingleArtist)
 	}
 
 	var tracks []*models.Track
@@ -163,6 +179,68 @@ func (c *ListenBrainz) QueryTracks() ([]*models.Track, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	return tracks, nil
+}
+
+func (c *ListenBrainz) getFreshReleaseTracks(user string, _ bool) ([]*models.Track, error) {
+	body, err := c.lbRequest(fmt.Sprintf("user/%s/fresh_releases?days=30", url.PathEscape(user)))
+	if err != nil {
+		return nil, fmt.Errorf("getFreshReleaseTracks(): %s", err.Error())
+	}
+
+	var resp FreshReleases
+	if err := util.ParseResp(body, &resp); err != nil {
+		return nil, fmt.Errorf("getFreshReleaseTracks(): %s", err.Error())
+	}
+
+	releases := resp.Payload.Releases
+	if len(releases) == 0 {
+		return nil, fmt.Errorf("no fresh releases found for user %s", user)
+	}
+
+	tracks := make([]*models.Track, 0, 25)
+	perGroup := make(map[string]int)
+	add := func(onlySingles bool) {
+		for _, release := range releases {
+			if len(tracks) >= 25 {
+				return
+			}
+			isSingle := strings.EqualFold(release.Type, "single")
+			if onlySingles != isSingle || release.Name == "" || release.Artist == "" {
+				continue
+			}
+
+			group := release.Group
+			if group == "" {
+				group = release.MBID
+			}
+			if perGroup[group] >= 2 {
+				continue
+			}
+
+			var coverURL string
+			if release.MBID != "" {
+				coverURL = fmt.Sprintf("https://coverartarchive.org/release/%s/front-250", release.MBID)
+			}
+
+			tracks = append(tracks, &models.Track{
+				Title:      release.Name,
+				CleanTitle: release.Name,
+				Artist:     release.Artist,
+				MainArtist: release.Artist,
+				Album:      release.Name,
+				CoverURL:   coverURL,
+			})
+			perGroup[group]++
+		}
+	}
+
+	add(true)
+	add(false)
+
+	if len(tracks) == 0 {
+		return nil, fmt.Errorf("no selectable fresh releases found for user %s", user)
 	}
 	return tracks, nil
 }
@@ -339,7 +417,6 @@ func (c *ListenBrainz) getImportPlaylist(user string) (string, error) {
 	}
 	return bestID, nil
 }
-
 
 func (c *ListenBrainz) parsePlaylist(identifier string, singleArtist bool) ([]*models.Track, error) {
 	body, err := c.lbRequest(fmt.Sprintf("playlist/%s", identifier))
