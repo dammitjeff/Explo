@@ -561,7 +561,7 @@ type partnerTrackData struct {
 // fetchSpotifyPlaylist fetches a public Spotify playlist via the internal
 // partner API (api-partner.spotify.com). Retries once with a fresh session
 // on failure. Returns playlist name, artwork URL, and normalized tracks.
-func fetchSpotifyPlaylist(playlistURL string) (string, string, [][4]string, error) {
+func fetchSpotifyPlaylist(playlistURL string) (string, string, []PlaylistTrack, error) {
 	id, err := extractSpotifyID(playlistURL)
 	if err != nil {
 		return "", "", nil, err
@@ -584,7 +584,7 @@ func fetchSpotifyPlaylist(playlistURL string) (string, string, [][4]string, erro
 	return name, artwork, tracks, nil
 }
 
-func fetchPlaylistByID(id string) (string, string, [][4]string, error) {
+func fetchPlaylistByID(id string) (string, string, []PlaylistTrack, error) {
 	if err := spSession.ensure(); err != nil {
 		return "", "", nil, err
 	}
@@ -674,8 +674,8 @@ func queryPartnerAPI(playlistID string, offset, limit int) (*partnerPlaylistResp
 
 // ── Track extraction helpers ────────────────────────────────────────────────
 
-func extractTracks(items []partnerItem) [][4]string {
-	tracks := make([][4]string, 0, len(items))
+func extractTracks(items []partnerItem) []PlaylistTrack {
+	tracks := make([]PlaylistTrack, 0, len(items))
 	for _, item := range items {
 		t := item.ItemV2.Data
 		if t.Name == "" {
@@ -689,16 +689,23 @@ func extractTracks(items []partnerItem) [][4]string {
 			}
 		}
 
+		fullArtist := strings.Join(artists, ", ")
+		mainArtist := fullArtist
+		if len(artists) > 0 {
+			mainArtist = artists[0]
+		}
+
 		coverURL := ""
 		if len(t.AlbumOfTrack.CoverArt.Sources) > 0 {
 			coverURL = pickBestSource(t.AlbumOfTrack.CoverArt.Sources, 300)
 		}
 
-		tracks = append(tracks, [4]string{
-			t.Name,
-			strings.Join(artists, ", "),
-			t.AlbumOfTrack.Name,
-			coverURL,
+		tracks = append(tracks, PlaylistTrack{
+			Title:      t.Name,
+			Artist:     fullArtist,
+			MainArtist: mainArtist,
+			Album:      t.AlbumOfTrack.Name,
+			CoverURL:   coverURL,
 		})
 	}
 	return tracks

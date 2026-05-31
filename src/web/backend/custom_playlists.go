@@ -127,7 +127,7 @@ func saveCustomPlaylists(cfgDir string, playlists []CustomPlaylist) error {
 type FetchResult struct {
 	Name       string
 	ArtworkURL string
-	Tracks     [][4]string
+	Tracks     []PlaylistTrack
 }
 
 // fetchCustomPlaylistTracks dispatches to the appropriate source fetcher.
@@ -157,10 +157,7 @@ func fetchCustomPlaylistTracks(p CustomPlaylist) (FetchResult, error) {
 		if err != nil {
 			return FetchResult{}, err
 		}
-		tracks := make([][4]string, len(modelTracks))
-		for i, t := range modelTracks {
-			tracks[i] = [4]string{t.CleanTitle, t.Artist, t.Album, t.CoverURL}
-		}
+		tracks := modelTracksToPlaylistTracks(modelTracks)
 		return FetchResult{Name: name, Tracks: tracks}, nil
 	}
 }
@@ -352,9 +349,9 @@ func (s *Server) handleImportCustomPlaylist(w http.ResponseWriter, r *http.Reque
 	seen := make(map[string]bool)
 	covers := make([]string, 0, 6)
 	for _, t := range tracks {
-		if t[3] != "" && !seen[t[3]] {
-			seen[t[3]] = true
-			covers = append(covers, t[3])
+		if t.CoverURL != "" && !seen[t.CoverURL] {
+			seen[t.CoverURL] = true
+			covers = append(covers, t.CoverURL)
 		}
 		if len(covers) >= 6 {
 			break
