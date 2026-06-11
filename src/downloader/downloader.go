@@ -270,7 +270,7 @@ func (c *DownloadClient) MoveDownload(srcDir, destDir, trackPath string, track *
 		track.File = filepath.Base(relativePath)
 		if track.File == "." || track.File == string(filepath.Separator) {
 			track.File = getFilename(track.CleanTitle, track.MainArtist) + filepath.Ext(track.File)
-			relativePath = track.File
+			relativePath = filepath.Dir(relativePath) + string(filepath.Separator) + track.File
 			slog.Warn(fmt.Sprintf("invalid path template result for track '%s' by '%s', using filename '%s' instead", track.Title, track.Artist, track.File))
 		}
 		dstFile = filepath.Join(destDir, relativePath)
