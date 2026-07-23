@@ -133,51 +133,88 @@ func (c *Slskd) GetConf() (MonitorConfig, error) {
 var errNoRes = errors.New("no results found for query")
 
 func (c *Slskd) QueryTrack(track *models.Track) error {
+	queries := c.searchQueries(track)
 
-	wildcardSearch := false
-	trackDetails := fmt.Sprintf("%s - %s", track.CleanTitle, track.Artist)
-
-	retry:
-		ID, err := c.searchTrack(trackDetails)
+	var lastErr error
+	for _, q := range queries {
+		ID, err := c.searchTrack(q)
 		if err != nil {
 			return err
 		}
-		slog.Info("initiating search", "track", trackDetails)
+		slog.Info("initiating search", "track", q)
 
-		cleanup := func() {
-    		if err := c.deleteSearch(ID); err != nil {
-        		slog.Warn("failed to delete search", "context", err.Error())
-    		}
+		completed, err := c.searchStatus(ID, q)
+		if err == nil && completed {
+			track.ID = ID
+			return nil
 		}
+		lastErr = err
 
-		completed, err := c.searchStatus(ID, trackDetails, 0)
-		if errors.Is(err, errNoRes) && !wildcardSearch {
-			cleanup()
-			wildcardSearch = true
-			trackDetails = fmt.Sprintf("%s - %s", track.CleanTitle, wildcardArtist(track.Artist))
-			slog.Debug("no result found with artist full name, trying with wildcard", "query", trackDetails)
-			goto retry
+		if delErr := c.deleteSearch(ID); delErr != nil {
+			slog.Warn("failed to delete search", "context", delErr.Error())
 		}
+	}
 
-		if err != nil {
-			cleanup()
-   	 		return err
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("no downloadable results for %s - %s", track.CleanTitle, track.Artist)
+}
+
+func (c *Slskd) searchQueries(track *models.Track) []string {
+	var queries []string
+	seen := make(map[string]bool)
+	add := func(q string) {
+		q = strings.TrimSpace(q)
+		if q == "" || seen[strings.ToLower(q)] {
+			return
 		}
+		seen[strings.ToLower(q)] = true
+		queries = append(queries, q)
+	}
 
-		if !completed {
-			cleanup()
-			return fmt.Errorf("search not completed for %s, skipping track", trackDetails)
+	add(fmt.Sprintf("%s - %s", track.CleanTitle, track.Artist))
+	names := artistNames(track.MainArtist)
+	if len(names) > 2 {
+		names = names[:2]
+	}
+	for _, name := range names {
+		add(fmt.Sprintf("%s %s", track.CleanTitle, name))
+	}
+	add(fmt.Sprintf("%s - %s", track.CleanTitle, wildcardArtist(track.Artist)))
+	return queries
+}
+
+func artistNames(artist string) []string {
+	norm := artist
+	for _, sep := range []string{" feat. ", " feat ", " featuring ", " ft. ", " ft ", " & ", " x ", ",", "/", "+", "&"} {
+		norm = strings.ReplaceAll(norm, sep, "|")
+	}
+	var names []string
+	for _, part := range strings.Split(norm, "|") {
+		if p := strings.TrimSpace(part); len([]rune(p)) >= 2 {
+			names = append(names, p)
 		}
-
-
-		track.ID = ID
-		return nil
+	}
+	return names
 }
 
 func (c *Slskd) GetTrack(track *models.Track) error {
-	results, err := c.searchResults(track.ID)
-	if err != nil {
-		return err
+	var results SearchResults
+	for attempt := 0; attempt < 4; attempt++ {
+		r, err := c.searchResults(track.ID)
+		if err != nil {
+			return err
+		}
+		results = r
+		total := 0
+		for _, res := range results {
+			total += len(res.Files)
+		}
+		if total > 0 {
+			break
+		}
+		time.Sleep(3 * time.Second)
 	}
 	files, err := c.CollectFiles(*track, results)
 	if err != nil {
@@ -215,31 +252,48 @@ func (c Slskd) searchTrack(trackDetails string) (string, error) {
 	return queryResult.ID, nil
 }
 
-func (c Slskd) searchStatus(ID, trackDetails string, count int) (bool, error) { // Recursive func to see if search for track is finished
+func (c Slskd) searchStatus(ID, trackDetails string) (bool, error) {
 	reqParams := fmt.Sprintf("/api/v0/searches/%s", ID)
 
-	body, err := c.HttpClient.MakeRequest("GET", c.Cfg.URL+reqParams, nil, c.Headers)
-	if err != nil {
-		return false, err
-	}
-	var queryResult Search
-	if err := util.ParseResp(body, &queryResult); err != nil {
-		return false, err
-	}
-	if queryResult.IsComplete && queryResult.FileCount > 0 {
-		return true, nil
-	} else if queryResult.IsComplete && queryResult.FileCount == 0 {
-		return false, errNoRes
-	} else if queryResult.IsComplete && queryResult.FileCount == queryResult.LockedFileCount {
-		return false, fmt.Errorf("search complete, did not find any downloadable files for %s", trackDetails)
-	} else if count >= c.Cfg.Retry {
-		slog.Debug(fmt.Sprintf("failed to remove %s", ID), logging.RuntimeAttr(""))
-		return false, fmt.Errorf("search wasn't completed after %d retries, skipping %s", count, trackDetails)
-	}
+	const pollInterval = 3 * time.Second
 
-	slog.Debug(fmt.Sprintf("[%s] (%d/%d) Searching for %s", "slskd", count, c.Cfg.Retry, trackDetails))
-	time.Sleep(15 * time.Second)
-	return c.searchStatus(ID, trackDetails, count+1)
+	maxWait := time.Duration(c.Cfg.Retry) * 15 * time.Second
+	if maxWait < 90*time.Second {
+		maxWait = 90 * time.Second
+	}
+	deadline := time.Now().Add(maxWait)
+
+	for {
+		body, err := c.HttpClient.MakeRequest("GET", c.Cfg.URL+reqParams, nil, c.Headers)
+		if err != nil {
+			return false, err
+		}
+		var queryResult Search
+		if err := util.ParseResp(body, &queryResult); err != nil {
+			return false, err
+		}
+
+		downloadable := queryResult.FileCount - queryResult.LockedFileCount
+
+		if queryResult.IsComplete {
+			if downloadable > 0 {
+				return true, nil
+			}
+			if queryResult.FileCount == 0 {
+				return false, errNoRes
+			}
+			return false, fmt.Errorf("search complete, did not find any downloadable files for %s", trackDetails)
+		}
+
+		if time.Now().After(deadline) {
+			if downloadable > 0 {
+				return true, nil
+			}
+			return false, fmt.Errorf("search wasn't completed within %s, skipping %s", maxWait, trackDetails)
+		}
+
+		time.Sleep(pollInterval)
+	}
 }
 
 func (c Slskd) searchResults(ID string) (SearchResults, error) {
@@ -269,44 +323,88 @@ func (c Slskd) deleteSearch(ID string) error {
 
 // Collect all files in response that match criteria
 func (c Slskd) CollectFiles(track models.Track, searchResults SearchResults) ([]File, error) {
-	sanitizedArtist := util.AlnumOnly(track.MainArtist)
-	sanitizedAlbum := util.AlnumOnly(track.Album)
 	sanitizedTitle := util.AlnumOnly(track.CleanTitle)
+	artistTokens := artistMatchTokens(track.MainArtist)
 
-	files := slices.Collect(func(yield func(File) bool) {
-		for _, result := range searchResults {
-			if result.FileCount > 0 && result.HasFreeUploadSlot {
-				for _, file := range result.Files {
-					file.Extension = strings.TrimPrefix(strings.ToLower(file.Extension), ".")
-					if file.Extension == "" {
-						extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(string(file.Name))), ".")
-						file.Extension = util.AlnumOnly(extension) // sanitize extension incase of bad chars
-					}
+	sanitizedAlbum := util.AlnumOnly(track.Album)
+	if sanitizedAlbum == sanitizedTitle || len([]rune(sanitizedAlbum)) < 4 {
+		sanitizedAlbum = ""
+	}
 
-					if !slices.Contains(c.Cfg.Filters.Extensions, file.Extension) && ContainsKeyword(track, file.Name, c.Cfg.Filters.FilterList) {
-						continue
-					}
+	var freeSlot, queued []File
+	for _, result := range searchResults {
+		if result.FileCount == 0 {
+			continue
+		}
+		for _, file := range result.Files {
+			file.Extension = strings.TrimPrefix(strings.ToLower(file.Extension), ".")
+			if file.Extension == "" {
+				extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(string(file.Name))), ".")
+				file.Extension = util.AlnumOnly(extension) // sanitize extension incase of bad chars
+			}
 
-					if track.Duration > 0 && util.Abs(track.Duration/1000-file.Length) > 10 { // skip song if track lengths have a 10s+ difference
-						continue
-					}
+			if !slices.Contains(c.Cfg.Filters.Extensions, file.Extension) && ContainsKeyword(track, file.Name, c.Cfg.Filters.FilterList) {
+				continue
+			}
 
-					sanitizedFilename := util.AlnumOnly(string(file.Name))
-					if (containsLower(sanitizedFilename, sanitizedArtist) || containsLower(sanitizedFilename, sanitizedAlbum)) && containsLower(sanitizedFilename, sanitizedTitle) {
-						file.Username = result.Username
-						if !yield(file) {
-							return
-						}
-					}
+			if track.Duration > 0 && util.Abs(track.Duration/1000-file.Length) > 10 { // skip song if track lengths have a 10s+ difference
+				continue
+			}
+
+			sanitizedFilename := util.AlnumOnly(string(file.Name))
+			base := filepath.Base(strings.ReplaceAll(string(file.Name), `\`, `/`))
+			titleOK := containsLower(util.AlnumOnly(base), sanitizedTitle)
+
+			artistOK := sanitizedAlbum != "" && containsLower(sanitizedFilename, sanitizedAlbum)
+			for _, tok := range artistTokens {
+				if containsLower(sanitizedFilename, tok) {
+					artistOK = true
+					break
+				}
+			}
+			if artistOK && titleOK {
+				file.Username = result.Username
+				if result.HasFreeUploadSlot {
+					freeSlot = append(freeSlot, file)
+				} else {
+					queued = append(queued, file)
 				}
 			}
 		}
-	})
+	}
+
+	files := append(freeSlot, queued...)
 	if len(files) != 0 {
 		return files, nil
-	} else {
-		return nil, fmt.Errorf("no tracks passed collection for %s - %s", track.MainArtist, track.CleanTitle)
 	}
+	return nil, fmt.Errorf("no tracks passed collection for %s - %s", track.MainArtist, track.CleanTitle)
+}
+
+func artistMatchTokens(artist string) []string {
+	lowered := strings.ToLower(artist)
+	for _, sep := range []string{" feat.", " feat ", " featuring ", " ft.", " ft ", " with ", " & ", " x ", ",", "/", "+"} {
+		lowered = strings.ReplaceAll(lowered, sep, "|")
+	}
+
+	seen := make(map[string]struct{})
+	var tokens []string
+	for _, part := range strings.Split(lowered, "|") {
+		tok := util.AlnumOnly(part)
+		if len(tok) < 3 {
+			continue
+		}
+		if _, dup := seen[tok]; dup {
+			continue
+		}
+		seen[tok] = struct{}{}
+		tokens = append(tokens, tok)
+	}
+	if len(tokens) == 0 {
+		if tok := util.AlnumOnly(artist); tok != "" {
+			tokens = append(tokens, tok)
+		}
+	}
+	return tokens
 }
 
 func (c Slskd) filterFiles(files []File) ([]File, error) {
@@ -318,11 +416,11 @@ func (c Slskd) filterFiles(files []File) ([]File, error) {
 				continue
 			}
 
-			if file.BitRate > 0 && file.BitRate <= c.Cfg.Filters.MinBitRate {
+			if file.BitRate > 0 && file.BitRate < c.Cfg.Filters.MinBitRate {
 				continue
 			}
 
-			if file.BitDepth > 0 && file.BitDepth <= c.Cfg.Filters.MinBitDepth {
+			if file.BitDepth > 0 && file.BitDepth < c.Cfg.Filters.MinBitDepth {
 				continue
 			}
 

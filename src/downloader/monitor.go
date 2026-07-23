@@ -87,12 +87,8 @@ func (c *DownloadClient) MonitorDownloads(tracks []*models.Track, m Monitor) err
 				slog.Info("[monitor] file downloaded successfully", "service", monCfg.Service, "file", track.File)
 				var path string
 				track.File, path = parsePath(track.File)
-				if monCfg.MigrateDownload {
-					if err = c.MoveDownload(monCfg.FromDir, monCfg.ToDir, path, track); err != nil {
-						slog.Error("error while moving file", "err", err.Error())
-					} else {
-						slog.Info("track moved successfully", "service", monCfg.Service)
-					}
+				if err = c.FinalizeDownload(monCfg, path, track); err != nil {
+					slog.Error("error finalizing download", "service", monCfg.Service, "err", err.Error())
 				}
 				delete(progressMap, key)
 				successDownloads += 1

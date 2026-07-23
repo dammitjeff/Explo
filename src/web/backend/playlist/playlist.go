@@ -50,7 +50,7 @@ var validPlaylistTypes = func() map[string]bool {
 }()
 
 func NewPlaylist(cfg app.Config, settings *settings.Settings) *Playlist {
-	return &Playlist{cfg: cfg}
+	return &Playlist{cfg: cfg, settings: settings}
 }
 
 // isValidPlaylistID accepts built-in playlist types and custom-* IDs (blocks path traversal).
