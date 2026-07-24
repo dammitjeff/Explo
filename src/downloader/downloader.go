@@ -368,7 +368,10 @@ func overwriteMetadata(metadata []string, coverPath, srcFile string) error {
 	if coverPath != "" {
 		if _, err := os.Stat(coverPath); err == nil {
 			streams = append(streams, ffmpeg.Input(coverPath))
-			opts["map"] = []string{"0:a", "1:v"}
+			// ffmpeg-go already emits "-map 0 -map 1" for the two inputs; drop input 0's
+			// existing artwork (optional, so it's a no-op when there isn't one) so the
+			// output ends with exactly the new cover.
+			opts["map"] = "-0:v?"
 			opts["disposition:v"] = "attached_pic"
 			if strings.EqualFold(filepath.Ext(srcFile), ".mp3") {
 				opts["id3v2_version"] = "3"
