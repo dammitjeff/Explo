@@ -41,12 +41,12 @@ type appleArtwork struct {
 }
 
 // resolveArtworkURL replaces Apple's {w}x{h}bb.{f} template placeholders
-// with concrete values for a 300x300 JPEG.
+// with concrete values for a 1000x1000 JPEG (Apple's CDN renders on demand).
 func resolveArtworkURL(tpl string) string {
 	if tpl == "" {
 		return ""
 	}
-	r := strings.NewReplacer("{w}", "300", "{h}", "300", "{f}", "jpg")
+	r := strings.NewReplacer("{w}", "1000", "{h}", "1000", "{f}", "jpg")
 	return r.Replace(tpl)
 }
 
