@@ -358,9 +358,10 @@ func (c *DownloadClient) MoveDownload(srcDir, destDir, trackPath string, track *
 
 func overwriteMetadata(metadata []string, coverPath, srcFile string) error {
 	opts := ffmpeg.KwArgs{
-		"c":        "copy",
-		"metadata": metadata,
-		"loglevel": "error",
+		"c":            "copy",
+		"map_metadata": "-1", // drop the uploader's tags entirely, then write only ours
+		"metadata":     metadata,
+		"loglevel":     "error",
 	}
 	streams := []*ffmpeg.Stream{ffmpeg.Input(srcFile)}
 
