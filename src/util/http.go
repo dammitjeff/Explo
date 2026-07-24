@@ -1,6 +1,8 @@
 package util
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"explo/src/logging"
@@ -120,17 +121,11 @@ func DownloadCover(url, coversDir string) (string, string) {
 	if url == "" {
 		return "", ""
 	}
-	parts := strings.Split(strings.TrimRight(url, "/"), "/")
-
-	if len(parts) < 2 {
-	return "", ""
-}
-	// Spotify CDN: https://i.scdn.co/image/<hash>  → use last segment
-	// CAA:         https://coverartarchive.org/release/<mbid>/front-250 → use second-to-last
-	id := parts[len(parts)-2]
-	if strings.Contains(url, "scdn.co") || strings.Contains(url, "spotifycdn.com") {
-		id = parts[len(parts)-1]
-	}
+	// Name the cover by a hash of the full URL so distinct images never collide.
+	// Deriving the id from a single path segment breaks when different albums share
+	// a generic segment (e.g. Apple/label URLs with ".../0/..." or ".../cover.jpg/...").
+	sum := sha1.Sum([]byte(url))
+	id := hex.EncodeToString(sum[:])[:16]
 	destPath := filepath.Join(coversDir, id+".jpg")
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
 		resp, err := http.Get(url) //nolint:noctx
