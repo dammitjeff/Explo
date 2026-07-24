@@ -29,16 +29,8 @@ type Song struct {
 // loadCustomTracks reads a custom playlist's track cache and returns them as
 // models.Track slices, bypassing the LB discovery step entirely.
 func loadCustomTracks(dataDir, playlistID string) ([]*models.Track, string, error) {
-	type cachedTrack struct {
-		Title      string `json:"title"`
-		Artist     string `json:"artist"`
-		MainArtist string `json:"mainArtist"`
-		Release    string `json:"release"`
-		CoverURL   string `json:"coverUrl"`
-		CoverPath  string `json:"coverPath"`
-	}
 	type cacheFile struct {
-		Tracks []cachedTrack `json:"tracks"`
+		Tracks []playlist.CachedTrack `json:"tracks"`
 	}
 	type customPlaylist struct {
 		ID   string `json:"id"`
@@ -79,6 +71,7 @@ func loadCustomTracks(dataDir, playlistID string) ([]*models.Track, string, erro
 			Title:      t.Title,
 			Artist:     t.Artist,
 			MainArtist: mainArtist,
+			Artists:    t.Artists,
 			Album:      t.Release,
 			CoverURL:   t.CoverURL,
 			CoverPath:  t.CoverPath,

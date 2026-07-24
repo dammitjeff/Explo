@@ -31,7 +31,34 @@ type appleItem struct {
 	TertiaryLinks []struct {
 		Title string `json:"title"` // album name
 	} `json:"tertiaryLinks"`
-	Artwork *appleArtwork `json:"artwork"`
+	// subtitleLinks holds each credited artist as its own entity (name + a segue to
+	// its artist page), which is what lets us recover the real individual artists
+	// instead of only the flattened "A & B" display string.
+	SubtitleLinks []appleLink   `json:"subtitleLinks"`
+	Artwork       *appleArtwork `json:"artwork"`
+}
+
+type appleLink struct {
+	Title string `json:"title"`
+	Segue struct {
+		Destination struct {
+			ContentDescriptor struct {
+				Kind string `json:"kind"`
+			} `json:"contentDescriptor"`
+		} `json:"destination"`
+	} `json:"segue"`
+}
+
+// artistsFromLinks returns the names of the links that point at an artist page,
+// in Apple's credited order (so the first is the lead artist).
+func artistsFromLinks(links []appleLink) []string {
+	var names []string
+	for _, l := range links {
+		if l.Segue.Destination.ContentDescriptor.Kind == "artist" && l.Title != "" {
+			names = append(names, l.Title)
+		}
+	}
+	return names
 }
 
 type appleArtwork struct {
@@ -156,8 +183,9 @@ func extractServerData(htmlStr string) (string, string, []PlaylistTrack, error) 
 				}
 				tracks = append(tracks, PlaylistTrack{
 					Title:      item.Title,
-					Artist:     item.ArtistName,
-					MainArtist: item.ArtistName,
+					Artist:     item.ArtistName,                  // full display credit ("A & B")
+					MainArtist: item.ArtistName,                  // kept broad for slskd matching
+					Artists:    artistsFromLinks(item.SubtitleLinks), // individuals; [0] is the lead
 					Album:      album,
 					CoverURL:   coverURL,
 				})
