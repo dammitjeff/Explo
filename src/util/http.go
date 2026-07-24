@@ -128,14 +128,21 @@ func DownloadCover(url, coversDir string) (string, string) {
 	id := hex.EncodeToString(sum[:])[:16]
 	destPath := filepath.Join(coversDir, id+".jpg")
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
-		// Retry with a timeout — a single un-timed GET permanently loses a cover on
-		// any transient hiccup, leaving the file to keep the uploader's artwork.
+		// Retry with a timeout and real backoff — Apple's CDN rate-limits bursts (and
+		// throttles the default Go user-agent harder), so a couple of quick tries lose
+		// the cover and leave the uploader's artwork. Back off long enough to outlast
+		// the limit window, and send a browser user-agent.
 		client := &http.Client{Timeout: 20 * time.Second}
-		for attempt := 0; attempt < 3; attempt++ {
+		for attempt := 0; attempt < 5; attempt++ {
 			if attempt > 0 {
-				time.Sleep(time.Duration(attempt) * time.Second)
+				time.Sleep(time.Duration(1<<attempt) * time.Second) // 2,4,8,16s
 			}
-			resp, err := client.Get(url) //nolint:noctx
+			req, err := http.NewRequest("GET", url, nil) //nolint:noctx
+			if err != nil {
+				break
+			}
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+			resp, err := client.Do(req)
 			if err != nil {
 				continue
 			}
