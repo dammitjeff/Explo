@@ -128,8 +128,18 @@ func DownloadCover(url, coversDir string) (string, string) {
 	id := hex.EncodeToString(sum[:])[:16]
 	destPath := filepath.Join(coversDir, id+".jpg")
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
-		resp, err := http.Get(url) //nolint:noctx
-		if err == nil {
+		// Retry with a timeout — a single un-timed GET permanently loses a cover on
+		// any transient hiccup, leaving the file to keep the uploader's artwork.
+		client := &http.Client{Timeout: 20 * time.Second}
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt > 0 {
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
+			resp, err := client.Get(url) //nolint:noctx
+			if err != nil {
+				continue
+			}
+			ok := false
 			func() {
 				defer func() {
 					if cerr := resp.Body.Close(); cerr != nil {
@@ -137,13 +147,21 @@ func DownloadCover(url, coversDir string) (string, string) {
 					}
 				}()
 				if resp.StatusCode == http.StatusOK {
-					if data, err := io.ReadAll(resp.Body); err == nil {
+					if data, err := io.ReadAll(resp.Body); err == nil && len(data) > 0 {
 						if err := os.WriteFile(destPath, data, 0644); err != nil {
 							slog.Error("failed writing cover", "path", destPath, "err", err.Error())
+						} else {
+							ok = true
 						}
 					}
 				}
 			}()
+			if ok {
+				break
+			}
+		}
+		if _, err := os.Stat(destPath); err != nil {
+			slog.Warn("cover download failed after retries", "url", url)
 		}
 	}
 	apiURL := fmt.Sprintf("/api/covers/%s.jpg", id)
