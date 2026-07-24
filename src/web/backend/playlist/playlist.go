@@ -113,7 +113,14 @@ func WritePlaylistCache(cfgPath, playlist string, tracks []*models.Track, added 
 
 	ct := make([]cachedTrack, len(tracks))
 	for i, t := range tracks {
-		apiPath, coverPath := util.DownloadCover(t.CoverURL, coversDir)
+		// Only fetch genuinely remote covers (ListenBrainz supplies a CoverArtArchive
+		// URL at run-time). Custom playlists arrive with an already-cached /api/covers
+		// path — re-running DownloadCover on that mangles it into a generic covers.jpg,
+		// so preserve it untouched.
+		apiPath, coverPath := t.CoverURL, t.CoverPath
+		if strings.HasPrefix(t.CoverURL, "http") {
+			apiPath, coverPath = util.DownloadCover(t.CoverURL, coversDir)
+		}
 		var inLibrary *bool
 		if added != nil {
 			v := added[t.CleanTitle+"|"+t.Artist]

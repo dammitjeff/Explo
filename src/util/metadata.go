@@ -41,7 +41,15 @@ func BuildffmpegMetadata(track models.Track) []string {
 
 	metadata = addStringTag(metadata, "title", track.Title)
 	metadata = addStringTag(metadata, "album", track.Album)
-	metadata = addStringTag(metadata, "albumartist", track.AlbumArtist)
+
+	albumArtist := track.AlbumArtist
+	if albumArtist == "" {
+		albumArtist = track.MainArtist
+	}
+	if albumArtist == "" {
+		albumArtist = track.Artist
+	}
+	metadata = addStringTag(metadata, "albumartist", albumArtist)
 	metadata = addStringTag(metadata, "artistsort", track.ArtistSort)
 	metadata = addStringTag(metadata, "date", track.OriginalDate)
 	metadata = addStringTag(metadata, "genre", track.Genres)

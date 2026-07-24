@@ -253,7 +253,7 @@ func (c *DownloadClient) FinalizeDownload(monCfg MonitorConfig, trackPath string
 	srcFile := filepath.Join(monCfg.FromDir, trackPath, track.File)
 
 	if c.Cfg.OverwriteMetadata {
-		if err := overwriteMetadata(util.BuildffmpegMetadata(*track), srcFile); err != nil {
+		if err := overwriteMetadata(util.BuildffmpegMetadata(*track), track.CoverPath, srcFile); err != nil {
 			slog.Warn("problem overwriting metadata", "msg", err.Error())
 		}
 	}
@@ -356,26 +356,35 @@ func (c *DownloadClient) MoveDownload(srcDir, destDir, trackPath string, track *
 	return nil
 }
 
-func overwriteMetadata(metadata []string, srcFile string) error {
+func overwriteMetadata(metadata []string, coverPath, srcFile string) error {
 	opts := ffmpeg.KwArgs{
-			"c": "copy",
-			"metadata": metadata,
-			"loglevel": "error",
-		}
-		streams := []*ffmpeg.Stream{
-    		ffmpeg.Input(srcFile),
-		}
+		"c":        "copy",
+		"metadata": metadata,
+		"loglevel": "error",
+	}
+	streams := []*ffmpeg.Stream{ffmpeg.Input(srcFile)}
 
-		tmpFile := tempAudioFile(srcFile)
-
-		if err := util.WriteMetadata(streams, "", tmpFile, opts); err != nil {
-			return fmt.Errorf("failed to overwrite metadata: %w", err)
-		} else {
-			if err := os.Rename(tmpFile, srcFile); err != nil {
-				return fmt.Errorf("failed to rename tmp file: %w", err)
+	// Embed the playlist's cover art, replacing whatever the uploader baked in.
+	if coverPath != "" {
+		if _, err := os.Stat(coverPath); err == nil {
+			streams = append(streams, ffmpeg.Input(coverPath))
+			opts["map"] = []string{"0:a", "1:v"}
+			opts["disposition:v"] = "attached_pic"
+			if strings.EqualFold(filepath.Ext(srcFile), ".mp3") {
+				opts["id3v2_version"] = "3"
 			}
 		}
-		return nil
+	}
+
+	tmpFile := tempAudioFile(srcFile)
+
+	if err := util.WriteMetadata(streams, "", tmpFile, opts); err != nil {
+		return fmt.Errorf("failed to overwrite metadata: %w", err)
+	}
+	if err := os.Rename(tmpFile, srcFile); err != nil {
+		return fmt.Errorf("failed to rename tmp file: %w", err)
+	}
+	return nil
 }
 
 func tempAudioFile(path string) string {
