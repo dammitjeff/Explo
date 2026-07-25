@@ -28,7 +28,7 @@ Explo uses the [ListenBrainz](https://listenbrainz.org/) recommendation engine t
 - Request tracks from YouTube, Soulseek, or both
 - Add metadata to downloaded tracks
 - Create playlists in your music system
-- Keep previous playlists for later listening
+- Optionally keep previous playlists for later listening
 ---
 
 ## Documentation

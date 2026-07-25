@@ -1,9 +1,9 @@
 package settings
 
 import (
-	"strings"
-	"os"
 	"fmt"
+	"os"
+	"strings"
 
 	"explo/src/web/backend/app"
 )
@@ -21,6 +21,7 @@ type Settings struct {
 func NewSettings(Config app.Config) *Settings {
 	return &Settings{cfg: Config}
 }
+
 // parseEnvText parses key=value lines, ignoring comments, blanks and unquotes variables
 func (s *Settings) ParseEnvText(text string) map[string]string {
 	out := map[string]string{}
@@ -47,6 +48,24 @@ func (s *Settings) ParseEnvText(text string) map[string]string {
 		}
 	}
 	return out
+}
+
+// validateEnvText rejects content that isn't valid .env syntax before it's written to
+// disk. cleanenv.ReadConfig fails hard on any non-blank, non-comment line without a "=",
+// which causes a crash loop for the container with no way tofix since the UI becomes
+// inaccessible.Mirrors ParseEnvText's line rules,but treats a missing "=" as an error
+// instead of silently skipping the line.
+func validateEnvText(text string) error {
+	for i, line := range strings.Split(text, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if !strings.Contains(t, "=") {
+			return fmt.Errorf("line %d is not valid .env syntax (expected KEY=value): %q", i+1, t)
+		}
+	}
+	return nil
 }
 
 // updateEnvKeys reads the env file (falling back to fallback if missing), updates the

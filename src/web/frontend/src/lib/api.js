@@ -73,11 +73,11 @@ export async function resetConfig() {
   if (!res.ok) throw new Error(await res.text())
 }
 
-export async function saveSchedule(name, enabled, day, hour, minute) {
+export async function saveSchedule(id, name, enabled, day, hour, minute) {
   const res = await apiFetch('/api/ui/config/schedules', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, enabled, day, hour, minute }),
+    body: JSON.stringify({ id, name, enabled, day, hour, minute }),
   })
   if (!res.ok) throw new Error(await res.text())
 }

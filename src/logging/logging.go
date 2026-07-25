@@ -1,16 +1,23 @@
 package logging
 
 import (
+	"explo/src/config"
 	"log/slog"
 	"os"
 	"runtime"
 )
 
 
-func Init(level string, notifyClient *NotificationClient) {
+func Init(cfg *config.Config) {
 	baseHandler := slog.NewTextHandler( os.Stdout, &slog.HandlerOptions{
-		Level: getLogLevel(level), 
+		Level: getLogLevel(cfg.LogLevel), 
 	})
+
+	var notifyClient *NotificationClient
+	if notifEnabled(cfg.NotifyCfg) {
+		notifyClient = InitNotify(cfg.NotifyCfg)
+	}
+	
 
 	handler := &notifyHandler{
 		handler:   baseHandler,

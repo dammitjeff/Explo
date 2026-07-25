@@ -89,8 +89,7 @@ func initHttpClient() *util.HttpClient {
 // Inits debug, gets playlist name, if needed, handles deprecation
 func setup(cfg *config.Config) {
 	cfg.HandleDeprecation()
-	notifyClient := logging.InitNotify(cfg.NotifyCfg)
-	logging.Init(cfg.LogLevel, notifyClient)
+	logging.Init(cfg)
 	cfg.GenPlaylistDetails()
 }
 func runSearchTest(cfg *config.Config, httpClient *util.HttpClient) {

@@ -243,10 +243,10 @@ function HomeSection() {
       }
       for (const cp of customList) {
         s[cp.id] = cp.schedule
-          ? { enabled: true, editing: false, ...cronToFields(cp.schedule) }
+          ? { name: cp.name, enabled: true, editing: false, ...cronToFields(cp.schedule) }
           : cp.flags
-            ? { enabled: true, editing: false, day: -2, hour: 4, minute: 0 }
-            : { enabled: false, day: -1, hour: 4, minute: 0, editing: false }
+            ? { name: cp.name, enabled: true, editing: false, day: -2, hour: 4, minute: 0 }
+            : { name: cp.name, enabled: false, day: -1, hour: 4, minute: 0, editing: false }
       }
       setSchedules(s)
     })
@@ -300,7 +300,7 @@ function HomeSection() {
       scheduleSaveStatus: scheduleSaveStatus[id] || '',
       onToggle: v => {
         setSchedules(prev => ({ ...prev, [id]: { ...prev[id], enabled: v } }))
-        saveSchedule(id, v, s.day, s.hour, s.minute)
+        saveSchedule(id, s.name, v, s.day, s.hour, s.minute)
           .then(() => flashStatus(id, 'Saved.'))
           .catch(() => flashStatus(id, 'Error saving.'))
       },
@@ -308,7 +308,7 @@ function HomeSection() {
         ...prev, [id]: { ...prev[id], editing: !prev[id].editing }
       })),
       onSave: () => {
-        saveSchedule(id, s.enabled, s.day, s.hour, s.minute)
+        saveSchedule(id, s.name, s.enabled, s.day, s.hour, s.minute)
           .then(() => flashStatus(id, 'Saved.'))
           .catch(() => flashStatus(id, 'Error saving.'))
         setSchedules(prev => ({ ...prev, [id]: { ...prev[id], editing: false } }))

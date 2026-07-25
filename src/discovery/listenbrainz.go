@@ -181,6 +181,11 @@ type MBRecording struct {
 	} `json:"releases"`
 }
 
+type TitleArgs struct {
+    CleanTitle string
+	FeatArtists    []string
+}
+
 type ListenBrainz struct {
 	HttpClient *util.HttpClient
 	Headers    map[string]string
@@ -356,17 +361,13 @@ func (c *ListenBrainz) getTracks(mbids []string, singleArtist bool) ([]*models.T
 		if len(recArtists) > 1 {
 			mainArtist = recArtists[0].Name
 			if singleArtist {
-				var b strings.Builder
-				b.WriteString(title)
-				b.WriteString(" feat. ")
-				b.WriteString(recArtists[1].Name)
+				var titleArgs TitleArgs
+                titleArgs.CleanTitle = rec.Name
+				for _, artist := range recArtists[1:] {
 
-				for _, a := range recArtists[2:] {
-					b.WriteString(", ")
-					b.WriteString(a.Name)
+					titleArgs.FeatArtists = append(titleArgs.FeatArtists, artist.Name)
 				}
-
-				title = b.String()
+                title = c.buildTrackTitle(titleArgs)
 				artist = mainArtist
 			}
 		}
@@ -455,17 +456,12 @@ func (c *ListenBrainz) enrichTracks(tracks []*models.Track, singleArtist bool) (
 		if len(recArtists) > 1 {
 			mainArtist = recArtists[0].Name
 			if singleArtist {
-				var b strings.Builder
-				b.WriteString(title)
-				b.WriteString(" feat. ")
-				b.WriteString(recArtists[1].Name)
-
-				for _, a := range recArtists[2:] {
-					b.WriteString(", ")
-					b.WriteString(a.Name)
+                var titleArgs TitleArgs
+				titleArgs.CleanTitle = rec.Name
+				for _, artist := range recArtists[1:] {
+					titleArgs.FeatArtists = append(titleArgs.FeatArtists, artist.Name)
 				}
-
-				title = b.String()
+				title = c.buildTrackTitle(titleArgs)
 				artist = mainArtist
 			} else {
 				for _, recArtist := range recArtists {
@@ -637,7 +633,6 @@ func (c *ListenBrainz) getImportPlaylist(user string) (string, error) {
 				bestID = parts[len(parts)-1]
 			}
 		}
-
 		if playlists.Count+playlists.Offset >= playlists.PlaylistCount || playlists.Count == 0 {
 			break
 		}
@@ -707,17 +702,13 @@ func (c *ListenBrainz) parsePlaylist(identifier string, singleArtist bool) (stri
 		if len(trackMeta.Artists) > 1 {
 			mainArtist = trackMeta.Artists[0].ArtistCreditName
 			if singleArtist {
-				var b strings.Builder
-				b.WriteString(title)
-				b.WriteString(" feat. ")
-				b.WriteString(trackArtists[1].ArtistCreditName)
-
-				for _, a := range trackArtists[2:] {
-					b.WriteString(", ")
-					b.WriteString(a.ArtistCreditName)
+                var titleargs TitleArgs
+				titleargs.CleanTitle = track.Title
+                for _, artist := range trackArtists[1:] {
+					titleargs.FeatArtists = append(titleargs.FeatArtists, artist.ArtistCreditName)
 				}
-				title = b.String()
-				artist = trackArtists[0].ArtistCreditName
+				title = c.buildTrackTitle(titleargs)
+                artist = trackArtists[0].ArtistCreditName
 			}
 		}
 
@@ -748,6 +739,27 @@ func (c *ListenBrainz) parsePlaylist(identifier string, singleArtist bool) (stri
 
 	return exploration.Playlist.Title, tracks, nil
 
+}
+
+func (c *ListenBrainz) buildTrackTitle(args TitleArgs) string {
+	var b strings.Builder
+
+	if len(args.FeatArtists) == 0 {
+		return args.CleanTitle
+	}
+
+	b.WriteString(args.CleanTitle)
+	b.WriteString(" (feat. ")
+	if len(args.FeatArtists) == 1 {
+		b.WriteString(args.FeatArtists[0])
+	} else {
+		b.WriteString(strings.Join(args.FeatArtists[:len(args.FeatArtists)-1], ", "))
+		b.WriteString(" & ")
+		b.WriteString(args.FeatArtists[len(args.FeatArtists)-1])
+	}
+	b.WriteString(")")
+
+	return b.String()
 }
 
 // Handle ListenBrainz API requests

@@ -639,7 +639,7 @@ export function PlaylistCard({
             boxShadow: '0 8px 24px #00000088',
           }}
         >
-          {sourceUrl && (
+          {sourceUrl && window.isSecureContext && (
             <button
               onClick={e => {
                 e.stopPropagation()

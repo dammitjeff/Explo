@@ -337,16 +337,17 @@ func (c Slskd) CollectFiles(track models.Track, searchResults SearchResults) ([]
 			continue
 		}
 		for _, file := range result.Files {
-			file.Extension = strings.TrimPrefix(strings.ToLower(file.Extension), ".")
-			if file.Extension == "" {
-				extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(string(file.Name))), ".")
-				file.Extension = util.AlnumOnly(extension) // sanitize extension incase of bad chars
+			// Resolve the extension from the filename first; slskd's reported
+			// Extension field is sometimes wrong or empty.
+			nameExt := util.AlnumOnly(strings.TrimPrefix(strings.ToLower(filepath.Ext(string(file.Name))), "."))
+			reportedExt := strings.TrimPrefix(strings.ToLower(file.Extension), ".")
+			if nameExt != "" {
+				file.Extension = nameExt
+			} else {
+				file.Extension = reportedExt
 			}
 
-			if !slices.Contains(c.Cfg.Filters.Extensions, file.Extension) {
-				continue
-			}
-			if ContainsKeyword(track, file.Name, c.Cfg.Filters.FilterList) {
+			if !slices.Contains(c.Cfg.Filters.Extensions, file.Extension) || ContainsKeyword(track, file.Name, c.Cfg.Filters.FilterList) {
 				continue
 			}
 

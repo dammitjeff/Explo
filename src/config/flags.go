@@ -20,6 +20,7 @@ func (cfg *Config) GetFlags() error {
 	var playlist string
 	var downloadMode string
 	var excludeLocal bool
+	var persist bool
 	var replace bool
 	var showVersion bool
 	var searchMBID string
@@ -29,6 +30,7 @@ func (cfg *Config) GetFlags() error {
 	flag.StringVarP(&configPath, "config", "c", ".env", "Path of the configuration file")
 	flag.StringVarP(&playlist, "playlist", "p", "weekly-exploration", "Playlist where to get tracks. Supported: weekly-exploration, weekly-jams, daily-jams, on-repeat")
 	flag.StringVarP(&downloadMode, "download-mode", "d", "normal", "Download mode: 'normal' (download only when track is not found locally), 'skip' (skip downloading, only use tracks already found locally), 'force' (always download, don't check for local tracks)")
+	flag.BoolVar(&persist, "persist", true, "Keep playlists between generations (DEPRECATED - use --replace-playlist instead)")
 	flag.BoolVarP(&excludeLocal, "exclude-local", "e", false, "Exclude locally found tracks from the imported playlist")
 	flag.BoolVar(&replace, "replace-playlist", true, "Replace existing playlist with the same name")
 	flag.BoolVarP(&showVersion, "version", "v", false, "Print version and exit")
@@ -42,6 +44,7 @@ func (cfg *Config) GetFlags() error {
 		fmt.Println(Version)
 		os.Exit(0)
 	}
+	persistSet := flag.Lookup("persist").Changed
 	cfgSet := flag.Lookup("config").Changed
 	playlistSet := flag.Lookup("playlist").Changed
 
@@ -68,6 +71,9 @@ func (cfg *Config) GetFlags() error {
 	cfg.Flags.SearchMBID = searchMBID
 	cfg.Flags.RefreshOnly = refreshOnly
 	cfg.Flags.CleanDownloads = cleanDownloads
+
+	// for deprecation purposes (can be removed at a later date)
+	cfg.Flags.PersistSet = persistSet
 
 	return nil
 }

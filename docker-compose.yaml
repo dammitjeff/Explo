@@ -18,8 +18,8 @@ services:
     environment:
       # User/group to run Explo as. Defaults to root (0:0) for backwards compatibility
       # Set these to the owner UID/GID of your music folder and Explo data folder for better permission handling
-      # - PUID=1000
-      # - PGID=1000
+      # - PUID=0
+      # - PGID=0
       - TZ=UTC # Change this to the timezone set in ListenBrainz (default is UTC)
       - WEB_UI=true
       # Web UI credentials (required for login)

@@ -20,7 +20,7 @@ import (
 
 
 type NotificationClient struct {
-	Cfg config.NotifyConfig
+	Cfg     config.NotifyConfig
 }
 
 func InitNotify(cfg config.NotifyConfig) *NotificationClient {
@@ -123,8 +123,17 @@ func formatRecordJSON(n Notification) string {
 	return string(nJSON)
 }
 
+func notifEnabled(cfg config.NotifyConfig) bool {
+	return len(cfg.Discord.ChannelIDs) > 0 ||
+		cfg.Matrix.AccessToken != "" ||
+		len(cfg.Http.ReceiverURLs) > 0
+}
+
 // send notifications to services that have variables defined
 func (c *NotificationClient) SendNotification(n Notification) {
+	if c == nil {
+		return
+	}
 	var errs []error
 
 	if len(c.Cfg.Discord.ChannelIDs) > 0 {

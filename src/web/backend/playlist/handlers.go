@@ -318,62 +318,6 @@ func (p *Playlist) HandleDeleteCustomPlaylist(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSaveSchedule updates a single playlist's schedule in the .env file.
-func (p *Playlist) HandleSaveSchedule(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name    string `json:"name"`
-		Enabled bool   `json:"enabled"`
-		Day     int    `json:"day"` // 0=Sun…6=Sat, -1=every day
-		Hour    int    `json:"hour"`
-		Minute  int    `json:"minute"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var envPrefix string
-	var defaultFlags string
-
-	if def, ok := defs.PlaylistDefs[body.Name]; ok {
-		envPrefix = def.EnvPrefix
-		defaultFlags = def.DefaultFlags
-	} else if defs.CustomIDRe.MatchString(body.Name) {
-		envPrefix = util.CustomEnvPrefix(body.Name)
-		defaultFlags = "--playlist " + body.Name
-	} else {
-		http.Error(w, "unknown playlist name", http.StatusBadRequest)
-		return
-	}
-
-	updates := map[string]string{}
-	if !body.Enabled {
-		// Toggle off — truly disable, regardless of day value carried over from state
-		updates[envPrefix+"_SCHEDULE"] = ""
-		updates[envPrefix+"_FLAGS"] = ""
-	} else if body.Day == -2 {
-		// "Never" — keep playlist active for manual runs but remove auto-schedule
-		updates[envPrefix+"_SCHEDULE"] = ""
-		updates[envPrefix+"_FLAGS"] = defaultFlags
-	} else {
-		dom := "*"
-		dow := "*"
-		if body.Day == 100 {
-			dom = "1"
-		} else if body.Day >= 0 {
-			dow = fmt.Sprintf("%d", body.Day)
-		}
-		updates[envPrefix+"_SCHEDULE"] = fmt.Sprintf("%d %d %s * %s", body.Minute, body.Hour, dom, dow)
-		updates[envPrefix+"_FLAGS"] = defaultFlags
-	}
-
-	if err := p.settings.UpdateEnvKeys(updates, web.SampleEnv); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
 // handleGetPlaylist serves the tracklist cache written by explo during its last run.
 // Returns an empty track list if no cache exists yet.
 func (p *Playlist) HandleGetPlaylist(w http.ResponseWriter, r *http.Request) {

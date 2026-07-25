@@ -150,10 +150,11 @@ func (c *Emby) SearchSongs(tracks []*models.Track) error {
 
 			musicBrainzMatch := track.MusicBrainzTrackID != "" && item.ProviderIds.MusicBrainzTrack == track.MusicBrainzTrackID
 			titleMatch := normalizedItemTitle == normalizedCleanTitle
+			albumMatch := util.ContainsFold(item.Album, track.Album)
 			artistMatch := strings.EqualFold(item.AlbumArtist, track.MainArtist) || (len(item.Artists) > 0 && strings.EqualFold(item.Artists[0], track.MainArtist))
-			pathMatch := util.ContainsFold(item.Path,track.File)
+			pathMatch := util.ContainsFold(item.Path, track.File)
 
-			if musicBrainzMatch || (titleMatch && artistMatch)  {
+			if musicBrainzMatch || (titleMatch && (albumMatch || artistMatch))  {
 				track.ID = item.ID
 				track.Present = true
 				break

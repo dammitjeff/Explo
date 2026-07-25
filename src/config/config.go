@@ -36,6 +36,7 @@ type Flags struct {
 	PlaylistSet	 bool
 	DownloadMode string
 	ExcludeLocal bool
+	PersistSet   bool
 	ReplacePlaylist bool
 	SearchMBID     string
 	RefreshOnly    bool
@@ -256,7 +257,10 @@ func (cfg *Config) HandleDeprecation() { //
 		slog.Warn("'DEBUG' variable is deprecated, please use LOG_LEVEL=DEBUG instead")
 		cfg.LogLevel = "DEBUG"
 	}
-if cfg.DiscoveryCfg.Listenbrainz.UserToken == "" {
+	if cfg.Flags.PersistSet {
+		slog.Warn("--persist has been deprecated since v1.1.3, please use --replace-playlist")
+	}
+	if cfg.DiscoveryCfg.Listenbrainz.UserToken == "" {
 		slog.Warn("Provide a ListenBrainz user token via Wizard or env (LISTENBRAINZ_USER_TOKEN)")
 	}
 
