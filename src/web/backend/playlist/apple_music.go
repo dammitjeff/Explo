@@ -2,6 +2,7 @@ package playlist
 
 import (
 	"encoding/json"
+	"explo/src/util"
 	"fmt"
 	"io"
 	"log/slog"
@@ -56,6 +57,26 @@ func artistsFromLinks(links []appleLink) []string {
 		}
 	}
 	return names
+}
+
+// addFeatArtists appends featured artists parsed from the title to the artist list.
+func addFeatArtists(artists []string, title string) []string {
+	if len(artists) == 0 {
+		return artists
+	}
+	for _, fa := range util.FeatArtists(title) {
+		dup := false
+		for _, a := range artists {
+			if strings.EqualFold(a, fa) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			artists = append(artists, fa)
+		}
+	}
+	return artists
 }
 
 type appleArtwork struct {
@@ -182,7 +203,7 @@ func extractServerData(htmlStr string) (string, string, []PlaylistTrack, error) 
 					Title:      item.Title,
 					Artist:     item.ArtistName,
 					MainArtist: item.ArtistName,
-					Artists:    artistsFromLinks(item.SubtitleLinks),
+					Artists:    addFeatArtists(artistsFromLinks(item.SubtitleLinks), item.Title),
 					Album:      album,
 					CoverURL:   coverURL,
 				})

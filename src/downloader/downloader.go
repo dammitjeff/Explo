@@ -250,6 +250,7 @@ func (c *DownloadClient) FinalizeDownload(monCfg MonitorConfig, trackPath string
 	srcFile := filepath.Join(monCfg.FromDir, trackPath, track.File)
 
 	if c.Cfg.OverwriteMetadata {
+		slog.Info(fmt.Sprintf("Writing clean metadata - %s", track.CleanTitle))
 		if err := overwriteMetadata(util.BuildffmpegMetadata(*track), track.CoverPath, srcFile); err != nil {
 			slog.Warn("problem overwriting metadata", "msg", err.Error())
 		}

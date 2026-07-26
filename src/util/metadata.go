@@ -3,6 +3,7 @@ package util
 import (
 	"explo/src/models"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	ffmpeg "github.com/u2takey/ffmpeg-go"
@@ -81,7 +82,9 @@ func BuildffmpegMetadata(track models.Track) []string {
 
 func WriteMetadata(streams []*ffmpeg.Stream, ffmpegPath, filePath string, opts ffmpeg.KwArgs) error {
 
-	cmd := ffmpeg.Output(streams, filePath, opts).OverWriteOutput().ErrorToStdOut()
+	cmd := ffmpeg.Output(streams, filePath, opts).OverWriteOutput().ErrorToStdOut().Silent(true)
+
+	slog.Debug("ffmpeg command", "args", "ffmpeg "+strings.Join(cmd.GetArgs(), " "))
 
 	if ffmpegPath != "" {
 		cmd.SetFfmpegPath(ffmpegPath)

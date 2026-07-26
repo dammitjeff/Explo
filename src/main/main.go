@@ -67,7 +67,7 @@ func loadCustomTracks(dataDir, playlistID string) ([]*models.Track, string, erro
 			mainArtist = t.Artist
 		}
 		tracks[i] = &models.Track{
-			CleanTitle: t.Title,
+			CleanTitle: util.CleanSearchTitle(t.Title),
 			Title:      t.Title,
 			Artist:     t.Artist,
 			MainArtist: mainArtist,

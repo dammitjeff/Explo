@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -99,6 +100,12 @@ type Slskd struct {
 	HttpClient  *util.HttpClient
 	DownloadDir string
 	Cfg         config.Slskd
+	retry       *retryState
+}
+
+type retryState struct {
+	mu        sync.Mutex
+	remaining map[string][]File // trackID -> untried ranked candidates
 }
 
 type SearchPayload struct {
@@ -108,7 +115,8 @@ type SearchPayload struct {
 func NewSlskd(cfg config.Slskd, downloadDir string) *Slskd {
 	return &Slskd{Cfg: cfg,
 		HttpClient:  util.NewHttp(util.HttpClientConfig{Timeout: cfg.Timeout}),
-		DownloadDir: downloadDir}
+		DownloadDir: downloadDir,
+		retry:       &retryState{remaining: make(map[string][]File)}}
 }
 
 func (c *Slskd) AddHeader() {
@@ -456,34 +464,57 @@ func artistMatchTokens(artist string) []string {
 
 func (c Slskd) queueDownload(files []File, track *models.Track) error {
 	for i, file := range files {
-		reqParams := fmt.Sprintf("/api/v0/transfers/downloads/%s", file.Username)
-		payload := []DownloadPayload{
-			{
-				Filename: file.Name,
-				Size:     file.Size,
-			},
+		if err := c.queueFile(file, track); err != nil {
+			slog.Warn(fmt.Sprintf("[%d/%d] failed to queue download for '%s - %s': %s", i+1, len(files), track.CleanTitle, track.Artist, err.Error()))
+			continue
 		}
-
-		DLpayload, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("failed to marshal payload: %s", err.Error())
-		}
-
-		_, err = c.HttpClient.MakeRequest("POST", c.Cfg.URL+reqParams, bytes.NewBuffer(DLpayload), c.Headers)
-		if err == nil {
-			track.MainArtistID = file.Username
-			track.Size = file.Size
-			track.File = file.Name
-			return nil
-		}
-
-		slog.Warn(fmt.Sprintf("[%d/%d] failed to queue download for '%s - %s': %s", i+1, len(files), track.CleanTitle, track.Artist, err.Error()))
-		continue
+		c.retry.mu.Lock()
+		c.retry.remaining[track.ID] = files[i+1:]
+		c.retry.mu.Unlock()
+		return nil
 	}
 	if err := c.deleteSearch(track.ID); err != nil {
 		slog.Debug("failed to delete search", logging.RuntimeAttr(err.Error()))
 	}
 	return fmt.Errorf("couldn't download track: %s - %s", track.CleanTitle, track.Artist)
+}
+
+// queueFile asks slskd to download one file and records it on the track.
+func (c Slskd) queueFile(file File, track *models.Track) error {
+	payload, err := json.Marshal([]DownloadPayload{{Filename: file.Name, Size: file.Size}})
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %s", err.Error())
+	}
+	reqParams := fmt.Sprintf("/api/v0/transfers/downloads/%s", file.Username)
+	if _, err := c.HttpClient.MakeRequest("POST", c.Cfg.URL+reqParams, bytes.NewBuffer(payload), c.Headers); err != nil {
+		return err
+	}
+	track.MainArtistID = file.Username
+	track.Size = file.Size
+	track.File = file.Name
+	return nil
+}
+
+// RetryDownload queues the next untried candidate, or returns false if none remain.
+func (c *Slskd) RetryDownload(track *models.Track) (bool, error) {
+	c.retry.mu.Lock()
+	files := c.retry.remaining[track.ID]
+	c.retry.mu.Unlock()
+
+	for i, file := range files {
+		if err := c.queueFile(file, track); err != nil {
+			continue
+		}
+		c.retry.mu.Lock()
+		c.retry.remaining[track.ID] = files[i+1:]
+		c.retry.mu.Unlock()
+		slog.Info("[slskd] retrying with next source", "track", track.CleanTitle, "file", file.Name)
+		return true, nil
+	}
+	c.retry.mu.Lock()
+	delete(c.retry.remaining, track.ID)
+	c.retry.mu.Unlock()
+	return false, nil
 }
 
 func (c *Slskd) GetDownloadStatus(tracks []*models.Track) (map[string]FileStatus, error) {
