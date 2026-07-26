@@ -114,28 +114,19 @@ func DownloadFile(url, destPath string) (string, error) {
 }
 
 // DownloadCover downloads coverURL into coversDir and returns cover api and filesystem path.
-// For CoverArtArchive URLs the id is the MusicBrainz release MBID (second-to-last
-// path segment). For Spotify CDN URLs (i.scdn.co) the id is the image hash (last
-// path segment). Returns "" if url is empty.
+// Returns "" if url is empty.
 func DownloadCover(url, coversDir string) (string, string) {
 	if url == "" {
 		return "", ""
 	}
-	// Name the cover by a hash of the full URL so distinct images never collide.
-	// Deriving the id from a single path segment breaks when different albums share
-	// a generic segment (e.g. Apple/label URLs with ".../0/..." or ".../cover.jpg/...").
 	sum := sha1.Sum([]byte(url))
 	id := hex.EncodeToString(sum[:])[:16]
 	destPath := filepath.Join(coversDir, id+".jpg")
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
-		// Retry with a timeout and real backoff — Apple's CDN rate-limits bursts (and
-		// throttles the default Go user-agent harder), so a couple of quick tries lose
-		// the cover and leave the uploader's artwork. Back off long enough to outlast
-		// the limit window, and send a browser user-agent.
 		client := &http.Client{Timeout: 20 * time.Second}
 		for attempt := 0; attempt < 5; attempt++ {
 			if attempt > 0 {
-				time.Sleep(time.Duration(1<<attempt) * time.Second) // 2,4,8,16s
+				time.Sleep(time.Duration(1<<attempt) * time.Second)
 			}
 			req, err := http.NewRequest("GET", url, nil) //nolint:noctx
 			if err != nil {

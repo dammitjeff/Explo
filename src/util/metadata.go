@@ -42,9 +42,6 @@ func BuildffmpegMetadata(track models.Track) []string {
 	metadata = addStringTag(metadata, "title", track.Title)
 	metadata = addStringTag(metadata, "album", track.Album)
 
-	// Group the album under the lead artist so media servers link a real artist
-	// instead of the whole "A & B" credit. Artists[0] is Apple's lead; fall back to
-	// the album/main/display artist when the individual list isn't available.
 	albumArtist := track.AlbumArtist
 	if albumArtist == "" && len(track.Artists) > 0 {
 		albumArtist = track.Artists[0]

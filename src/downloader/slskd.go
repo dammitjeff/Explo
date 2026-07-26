@@ -145,8 +145,11 @@ func (c *Slskd) QueryTrack(track *models.Track) error {
 
 		completed, err := c.searchStatus(ID, q)
 		if err == nil && completed {
-			track.ID = ID
-			return nil
+			_, err = c.fetchCollectableFiles(track, ID)
+			if err == nil {
+				track.ID = ID
+				return nil
+			}
 		}
 		lastErr = err
 
@@ -174,7 +177,12 @@ func (c *Slskd) searchQueries(track *models.Track) []string {
 	}
 
 	add(fmt.Sprintf("%s - %s", track.CleanTitle, track.Artist))
-	names := artistNames(track.MainArtist)
+	var names []string
+	for _, n := range splitArtists(track.MainArtist) {
+		if len([]rune(n)) >= 2 {
+			names = append(names, n)
+		}
+	}
 	if len(names) > 2 {
 		names = names[:2]
 	}
@@ -185,26 +193,37 @@ func (c *Slskd) searchQueries(track *models.Track) []string {
 	return queries
 }
 
-func artistNames(artist string) []string {
+func splitArtists(artist string) []string {
 	norm := artist
-	for _, sep := range []string{" feat. ", " feat ", " featuring ", " ft. ", " ft ", " & ", " x ", ",", "/", "+", "&"} {
+	for _, sep := range []string{" featuring ", " feat.", " feat ", " ft.", " ft ", " with ", " & ", " x ", ",", "/", "+", "&"} {
 		norm = strings.ReplaceAll(norm, sep, "|")
 	}
-	var names []string
+	var parts []string
 	for _, part := range strings.Split(norm, "|") {
-		if p := strings.TrimSpace(part); len([]rune(p)) >= 2 {
-			names = append(names, p)
+		if p := strings.TrimSpace(part); p != "" {
+			parts = append(parts, p)
 		}
 	}
-	return names
+	return parts
 }
 
 func (c *Slskd) GetTrack(track *models.Track) error {
+	files, err := c.fetchCollectableFiles(track, track.ID)
+	if err != nil {
+		return err
+	}
+	if err := c.queueDownload(files, track); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Slskd) fetchCollectableFiles(track *models.Track, searchID string) ([]File, error) {
 	var results SearchResults
 	for attempt := 0; attempt < 4; attempt++ {
-		r, err := c.searchResults(track.ID)
+		r, err := c.searchResults(searchID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		results = r
 		total := 0
@@ -216,18 +235,7 @@ func (c *Slskd) GetTrack(track *models.Track) error {
 		}
 		time.Sleep(3 * time.Second)
 	}
-	files, err := c.CollectFiles(*track, results)
-	if err != nil {
-		return err
-	}
-	filterFiles, err := c.filterFiles(files)
-	if err != nil {
-		return err
-	}
-	if err := c.queueDownload(filterFiles, track); err != nil {
-		return err
-	}
-	return nil
+	return c.CollectFiles(*track, results)
 }
 
 func (c Slskd) searchTrack(trackDetails string) (string, error) {
@@ -321,7 +329,6 @@ func (c Slskd) deleteSearch(ID string) error {
 	return nil
 }
 
-// Collect all files in response that match criteria
 func (c Slskd) CollectFiles(track models.Track, searchResults SearchResults) ([]File, error) {
 	sanitizedTitle := util.AlnumOnly(track.CleanTitle)
 	artistTokens := artistMatchTokens(track.MainArtist)
@@ -331,14 +338,23 @@ func (c Slskd) CollectFiles(track models.Track, searchResults SearchResults) ([]
 		sanitizedAlbum = ""
 	}
 
-	var freeSlot, queued []File
+	extRank := make(map[string]int, len(c.Cfg.Filters.Extensions))
+	for i, ext := range c.Cfg.Filters.Extensions {
+		extRank[ext] = i
+	}
+
+	type candidate struct {
+		file     File
+		freeSlot bool
+		rank     int
+	}
+	var candidates []candidate
+
 	for _, result := range searchResults {
 		if result.FileCount == 0 {
 			continue
 		}
 		for _, file := range result.Files {
-			// Resolve the extension from the filename first; slskd's reported
-			// Extension field is sometimes wrong or empty.
 			nameExt := util.AlnumOnly(strings.TrimPrefix(strings.ToLower(filepath.Ext(string(file.Name))), "."))
 			reportedExt := strings.TrimPrefix(strings.ToLower(file.Extension), ".")
 			if nameExt != "" {
@@ -347,7 +363,8 @@ func (c Slskd) CollectFiles(track models.Track, searchResults SearchResults) ([]
 				file.Extension = reportedExt
 			}
 
-			if !slices.Contains(c.Cfg.Filters.Extensions, file.Extension) || ContainsKeyword(track, file.Name, c.Cfg.Filters.FilterList) {
+			rank, ok := extRank[file.Extension]
+			if !ok || ContainsKeyword(track, file.Name, c.Cfg.Filters.FilterList) {
 				continue
 			}
 
@@ -355,44 +372,70 @@ func (c Slskd) CollectFiles(track models.Track, searchResults SearchResults) ([]
 				continue
 			}
 
-			sanitizedFilename := util.AlnumOnly(string(file.Name))
-			base := filepath.Base(strings.ReplaceAll(string(file.Name), `\`, `/`))
-			titleOK := containsLower(util.AlnumOnly(base), sanitizedTitle)
+			if file.BitRate > 0 && file.BitRate < c.Cfg.Filters.MinBitRate {
+				continue
+			}
+			if file.BitDepth > 0 && file.BitDepth < c.Cfg.Filters.MinBitDepth {
+				continue
+			}
 
-			artistOK := sanitizedAlbum != "" && containsLower(sanitizedFilename, sanitizedAlbum)
-			for _, tok := range artistTokens {
-				if containsLower(sanitizedFilename, tok) {
-					artistOK = true
-					break
-				}
+			if !matchesTrack(file, sanitizedTitle, sanitizedAlbum, artistTokens) {
+				continue
 			}
-			if artistOK && titleOK {
-				file.Username = result.Username
-				if result.HasFreeUploadSlot {
-					freeSlot = append(freeSlot, file)
-				} else {
-					queued = append(queued, file)
-				}
-			}
+
+			file.Username = result.Username
+			candidates = append(candidates, candidate{file: file, freeSlot: result.HasFreeUploadSlot, rank: rank})
 		}
 	}
 
-	files := append(freeSlot, queued...)
-	if len(files) != 0 {
-		return files, nil
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no tracks passed collection for %s - %s", track.MainArtist, track.CleanTitle)
 	}
-	return nil, fmt.Errorf("no tracks passed collection for %s - %s", track.MainArtist, track.CleanTitle)
+
+	slices.SortStableFunc(candidates, func(a, b candidate) int {
+		if a.freeSlot != b.freeSlot {
+			if a.freeSlot {
+				return -1
+			}
+			return 1
+		}
+		if a.rank != b.rank {
+			return a.rank - b.rank
+		}
+		return b.file.BitRate - a.file.BitRate
+	})
+
+	files := make([]File, 0, len(candidates))
+	for _, cand := range candidates {
+		files = append(files, cand.file)
+		if len(files) >= c.Cfg.DownloadAttempts {
+			break
+		}
+	}
+	return files, nil
+}
+
+func matchesTrack(file File, sanitizedTitle, sanitizedAlbum string, artistTokens []string) bool {
+	base := filepath.Base(strings.ReplaceAll(string(file.Name), `\`, `/`))
+	if !containsLower(util.AlnumOnly(base), sanitizedTitle) {
+		return false
+	}
+	sanitizedFilename := util.AlnumOnly(string(file.Name))
+	if sanitizedAlbum != "" && containsLower(sanitizedFilename, sanitizedAlbum) {
+		return true
+	}
+	for _, tok := range artistTokens {
+		if containsLower(sanitizedFilename, tok) {
+			return true
+		}
+	}
+	return false
 }
 
 func artistMatchTokens(artist string) []string {
-	lowered := strings.ToLower(artist)
-	for _, sep := range []string{" feat.", " feat ", " featuring ", " ft.", " ft ", " with ", " & ", " x ", ",", "/", "+"} {
-		lowered = strings.ReplaceAll(lowered, sep, "|")
-	}
-
 	seen := make(map[string]struct{})
 	var tokens []string
-	for _, part := range strings.Split(lowered, "|") {
+	for _, part := range splitArtists(strings.ToLower(artist)) {
 		tok := util.AlnumOnly(part)
 		if len(tok) < 3 {
 			continue
@@ -409,36 +452,6 @@ func artistMatchTokens(artist string) []string {
 		}
 	}
 	return tokens
-}
-
-func (c Slskd) filterFiles(files []File) ([]File, error) {
-	var filtered []File
-
-	for _, ext := range c.Cfg.Filters.Extensions {
-		for _, file := range files {
-			if file.Extension != ext {
-				continue
-			}
-
-			if file.BitRate > 0 && file.BitRate < c.Cfg.Filters.MinBitRate {
-				continue
-			}
-
-			if file.BitDepth > 0 && file.BitDepth < c.Cfg.Filters.MinBitDepth {
-				continue
-			}
-
-			filtered = append(filtered, file)
-			if len(filtered) >= c.Cfg.DownloadAttempts {
-				return filtered, nil
-			}
-		}
-	}
-
-	if len(filtered) == 0 {
-		return nil, fmt.Errorf("no files found that match filters")
-	}
-	return filtered, nil
 }
 
 func (c Slskd) queueDownload(files []File, track *models.Track) error {
@@ -473,7 +486,6 @@ func (c Slskd) queueDownload(files []File, track *models.Track) error {
 	return fmt.Errorf("couldn't download track: %s - %s", track.CleanTitle, track.Artist)
 }
 
-
 func (c *Slskd) GetDownloadStatus(tracks []*models.Track) (map[string]FileStatus, error) {
 	reqParams := "/api/v0/transfers/downloads"
 	fileStatuses := make(map[string]FileStatus, len(tracks))
@@ -496,12 +508,12 @@ func (c *Slskd) GetDownloadStatus(tracks []*models.Track) (map[string]FileStatus
 				for _, file := range dir.Files {
 					if string(file.Name) == track.File {
 						fileStatuses[track.File] = FileStatus{
-							ID: file.ID,
-							Size: file.Size,
-							State: normalize(file.State),
+							ID:               file.ID,
+							Size:             file.Size,
+							State:            normalize(file.State),
 							BytesTransferred: file.BytesTransferred,
-							BytesRemaining: file.BytesRemaining,
-							PercentComplete: file.PercentComplete,
+							BytesRemaining:   file.BytesRemaining,
+							PercentComplete:  file.PercentComplete,
 						}
 					}
 				}
@@ -551,28 +563,28 @@ func wildcardArtist(artist string) string {
 	if len(artist) >= 4 && strings.EqualFold(artist[:4], "the ") {
 		prefix = artist[:4]
 		artist = strings.TrimSpace(artist[4:])
-}
-    r := []rune(strings.TrimSpace(artist))
+	}
+	r := []rune(strings.TrimSpace(artist))
 
-    if len(r) < 3 {
-        return artist
-    }
+	if len(r) < 3 {
+		return artist
+	}
 
-    r[0] = '*'
-    return prefix + string(r)
+	r[0] = '*'
+	return prefix + string(r)
 }
 
 // different failure states slskd has (format is "Completed,Rejected", "Errored,Cancelled" etc..)
-var failureStates = map[string]struct{} {
-	"Aborted": {},
-	"TimedOut": {},
-	"Rejected": {},
-	"Errored":  {},
+var failureStates = map[string]struct{}{
+	"Aborted":   {},
+	"TimedOut":  {},
+	"Rejected":  {},
+	"Errored":   {},
 	"Cancelled": {},
 }
 
 // return a single error state for failed downloads
-func normalize(state string) string{
+func normalize(state string) string {
 	parts := strings.SplitSeq(state, ",")
 
 	for p := range parts {

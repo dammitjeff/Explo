@@ -106,10 +106,7 @@ func WritePlaylistCache(cfgPath, playlist string, tracks []*models.Track, added 
 
 	ct := make([]CachedTrack, len(tracks))
 	for i, t := range tracks {
-		// Only fetch genuinely remote covers (ListenBrainz supplies a CoverArtArchive
-		// URL at run-time). Custom playlists arrive with an already-cached /api/covers
-		// path — re-running DownloadCover on that mangles it into a generic covers.jpg,
-		// so preserve it untouched.
+		// only re-download genuinely remote covers; already-cached /api/covers paths stay as-is
 		apiPath, coverPath := t.CoverURL, t.CoverPath
 		if strings.HasPrefix(t.CoverURL, "http") {
 			apiPath, coverPath = util.DownloadCover(t.CoverURL, coversDir)
@@ -162,9 +159,7 @@ func lbGet(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// CachedTrack is the single canonical shape of a track in a playlist cache file.
-// Import-time writes, run-time writes, and the loader all use it, so a round-trip
-// through a run can't silently drop fields (it used to lose mainArtist).
+// CachedTrack is the canonical shape of a track in a playlist cache file.
 type CachedTrack struct {
 	Rank       int      `json:"rank"`
 	Title      string   `json:"title"`
@@ -202,8 +197,7 @@ func downloadAndCacheCovers(cfgDir, playlistType string, tracks []PlaylistTrack)
 	ct := make([]CachedTrack, len(tracks))
 	for i, t := range tracks {
 		if i > 0 {
-			// Space the requests so a burst of covers doesn't trip Apple's rate limit
-			// (which silently 404s a run of images, leaving those tracks un-arted).
+			// space requests so a burst doesn't trip Apple's rate limit
 			time.Sleep(300 * time.Millisecond)
 		}
 		APIPath, coverPath := util.DownloadCover(t.CoverURL, coversDir)

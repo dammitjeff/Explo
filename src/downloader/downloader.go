@@ -246,9 +246,6 @@ func buildTrackPath(template string, track *models.Track) string {
 	return filepath.Clean(result)
 }
 
-// FinalizeDownload corrects a completed download in place — tags then optional rename —
-// and relocates it when migration is enabled. Runs for every finished download so tags
-// are fixed whether or not files are migrated.
 func (c *DownloadClient) FinalizeDownload(monCfg MonitorConfig, trackPath string, track *models.Track) error {
 	srcFile := filepath.Join(monCfg.FromDir, trackPath, track.File)
 
@@ -359,19 +356,15 @@ func (c *DownloadClient) MoveDownload(srcDir, destDir, trackPath string, track *
 func overwriteMetadata(metadata []string, coverPath, srcFile string) error {
 	opts := ffmpeg.KwArgs{
 		"c":            "copy",
-		"map_metadata": "-1", // drop the uploader's tags entirely, then write only ours
+		"map_metadata": "-1",
 		"metadata":     metadata,
 		"loglevel":     "error",
 	}
 	streams := []*ffmpeg.Stream{ffmpeg.Input(srcFile)}
 
-	// Embed the playlist's cover art, replacing whatever the uploader baked in.
 	if coverPath != "" {
 		if _, err := os.Stat(coverPath); err == nil {
 			streams = append(streams, ffmpeg.Input(coverPath))
-			// ffmpeg-go already emits "-map 0 -map 1" for the two inputs; drop input 0's
-			// existing artwork (optional, so it's a no-op when there isn't one) so the
-			// output ends with exactly the new cover.
 			opts["map"] = "-0:v?"
 			opts["disposition:v"] = "attached_pic"
 			if strings.EqualFold(filepath.Ext(srcFile), ".mp3") {
