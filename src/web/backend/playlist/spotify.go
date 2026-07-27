@@ -697,7 +697,7 @@ func extractTracks(items []partnerItem) []PlaylistTrack {
 
 		coverURL := ""
 		if len(t.AlbumOfTrack.CoverArt.Sources) > 0 {
-			coverURL = pickBestSource(t.AlbumOfTrack.CoverArt.Sources, 300)
+			coverURL = pickBestSource(t.AlbumOfTrack.CoverArt.Sources, 640)
 		}
 
 		tracks = append(tracks, PlaylistTrack{

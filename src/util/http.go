@@ -1,6 +1,8 @@
 package util
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"explo/src/logging"
@@ -78,6 +79,45 @@ func ParseResp[T any](body []byte, target *T) error {
 	return nil
 }
 
+// browserUA mimics a desktop browser; the default Go UA gets throttled harder.
+const browserUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+// fetchBytes GETs url with a browser user-agent, retrying with backoff.
+func fetchBytes(url string) ([]byte, error) {
+	client := &http.Client{Timeout: 20 * time.Second}
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(1<<attempt) * time.Second)
+		}
+		req, err := http.NewRequest("GET", url, nil) //nolint:noctx
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", browserUA)
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("status %d from %s", resp.StatusCode, url)
+			continue
+		}
+		data, rerr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if rerr == nil && len(data) > 0 {
+			return data, nil
+		}
+		lastErr = rerr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no data from %s", url)
+	}
+	return nil, lastErr
+}
+
 // DownloadFile downloads a URL to destPath, creating parent directories as needed.
 // No-op if destPath already exists. Returns the resolved local path on success.
 func DownloadFile(url, destPath string) (string, error) {
@@ -90,21 +130,9 @@ func DownloadFile(url, destPath string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
-	resp, err := http.Get(url) //nolint:noctx
+	data, err := fetchBytes(url)
 	if err != nil {
-		return "", fmt.Errorf("get: %w", err)
-	}
-	defer func() {
-		if cerr := resp.Body.Close(); cerr != nil {
-			slog.Warn("DownloadFile: close failed", "err", cerr.Error())
-		}
-	}()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %d from %s", resp.StatusCode, url)
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read body: %w", err)
+		return "", err
 	}
 	if err := os.WriteFile(destPath, data, 0644); err != nil {
 		return "", fmt.Errorf("write: %w", err)
@@ -113,42 +141,19 @@ func DownloadFile(url, destPath string) (string, error) {
 }
 
 // DownloadCover downloads coverURL into coversDir and returns cover api and filesystem path.
-// For CoverArtArchive URLs the id is the MusicBrainz release MBID (second-to-last
-// path segment). For Spotify CDN URLs (i.scdn.co) the id is the image hash (last
-// path segment). Returns "" if url is empty.
+// Returns "" if url is empty.
 func DownloadCover(url, coversDir string) (string, string) {
 	if url == "" {
 		return "", ""
 	}
-	parts := strings.Split(strings.TrimRight(url, "/"), "/")
-
-	if len(parts) < 2 {
-	return "", ""
-}
-	// Spotify CDN: https://i.scdn.co/image/<hash>  → use last segment
-	// CAA:         https://coverartarchive.org/release/<mbid>/front-250 → use second-to-last
-	id := parts[len(parts)-2]
-	if strings.Contains(url, "scdn.co") || strings.Contains(url, "spotifycdn.com") {
-		id = parts[len(parts)-1]
-	}
+	sum := sha1.Sum([]byte(url))
+	id := hex.EncodeToString(sum[:])[:16]
 	destPath := filepath.Join(coversDir, id+".jpg")
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
-		resp, err := http.Get(url) //nolint:noctx
-		if err == nil {
-			func() {
-				defer func() {
-					if cerr := resp.Body.Close(); cerr != nil {
-						slog.Error("failed to close cover response", "err", cerr.Error())
-					}
-				}()
-				if resp.StatusCode == http.StatusOK {
-					if data, err := io.ReadAll(resp.Body); err == nil {
-						if err := os.WriteFile(destPath, data, 0644); err != nil {
-							slog.Error("failed writing cover", "path", destPath, "err", err.Error())
-						}
-					}
-				}
-			}()
+		if data, err := fetchBytes(url); err != nil {
+			slog.Warn("cover download failed", "url", url, "err", err.Error())
+		} else if err := os.WriteFile(destPath, data, 0644); err != nil {
+			slog.Error("failed writing cover", "path", destPath, "err", err.Error())
 		}
 	}
 	apiURL := fmt.Sprintf("/api/covers/%s.jpg", id)

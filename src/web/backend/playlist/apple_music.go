@@ -2,6 +2,7 @@ package playlist
 
 import (
 	"encoding/json"
+	"explo/src/util"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,7 +32,51 @@ type appleItem struct {
 	TertiaryLinks []struct {
 		Title string `json:"title"` // album name
 	} `json:"tertiaryLinks"`
-	Artwork *appleArtwork `json:"artwork"`
+	// individual credited artists (lead first), not just the flattened display string
+	SubtitleLinks []appleLink   `json:"subtitleLinks"`
+	Artwork       *appleArtwork `json:"artwork"`
+}
+
+type appleLink struct {
+	Title string `json:"title"`
+	Segue struct {
+		Destination struct {
+			ContentDescriptor struct {
+				Kind string `json:"kind"`
+			} `json:"contentDescriptor"`
+		} `json:"destination"`
+	} `json:"segue"`
+}
+
+// artistsFromLinks returns the artist-page link names, lead artist first.
+func artistsFromLinks(links []appleLink) []string {
+	var names []string
+	for _, l := range links {
+		if l.Segue.Destination.ContentDescriptor.Kind == "artist" && l.Title != "" {
+			names = append(names, l.Title)
+		}
+	}
+	return names
+}
+
+// addFeatArtists appends featured artists parsed from the title to the artist list.
+func addFeatArtists(artists []string, title string) []string {
+	if len(artists) == 0 {
+		return artists
+	}
+	for _, fa := range util.FeatArtists(title) {
+		dup := false
+		for _, a := range artists {
+			if strings.EqualFold(a, fa) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			artists = append(artists, fa)
+		}
+	}
+	return artists
 }
 
 type appleArtwork struct {
@@ -41,12 +86,12 @@ type appleArtwork struct {
 }
 
 // resolveArtworkURL replaces Apple's {w}x{h}bb.{f} template placeholders
-// with concrete values for a 300x300 JPEG.
+// with concrete values for a 1000x1000 JPEG (Apple's CDN renders on demand).
 func resolveArtworkURL(tpl string) string {
 	if tpl == "" {
 		return ""
 	}
-	r := strings.NewReplacer("{w}", "300", "{h}", "300", "{f}", "jpg")
+	r := strings.NewReplacer("{w}", "1000", "{h}", "1000", "{f}", "jpg")
 	return r.Replace(tpl)
 }
 
@@ -158,6 +203,7 @@ func extractServerData(htmlStr string) (string, string, []PlaylistTrack, error) 
 					Title:      item.Title,
 					Artist:     item.ArtistName,
 					MainArtist: item.ArtistName,
+					Artists:    addFeatArtists(artistsFromLinks(item.SubtitleLinks), item.Title),
 					Album:      album,
 					CoverURL:   coverURL,
 				})

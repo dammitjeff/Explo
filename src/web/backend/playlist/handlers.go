@@ -19,6 +19,14 @@ import (
 )
 
 
+// artworkURLFor returns the local artwork path if cached, else the remote URL.
+func artworkURLFor(dir, id, remoteURL string) string {
+	if _, err := os.Stat(CustomPlaylistArtworkPath(dir, id)); err == nil {
+		return "/api/playlist-artwork/" + id + ".jpg"
+	}
+	return remoteURL
+}
+
 // handleGetCustomPlaylists returns all saved custom playlists with a track_count
 // derived from their cache file (if present) and the current sync schedule from .env.
 func (p *Playlist) HandleGetCustomPlaylists(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +52,7 @@ func (p *Playlist) HandleGetCustomPlaylists(w http.ResponseWriter, r *http.Reque
 		prefix := util.CustomEnvPrefix(plist.Name)
 		sched := envValues[prefix+"_SCHEDULE"]
 		flags := envValues[prefix+"_FLAGS"]
+		plist.ArtworkURL = artworkURLFor(p.cfg.WebDataDir, plist.ID, plist.ArtworkURL)
 		items = append(items, respItem{CustomPlaylist: plist, TrackCount: count, Schedule: sched, Flags: flags})
 	}
 
@@ -190,7 +199,7 @@ func (p *Playlist) HandleImportCustomPlaylist(w http.ResponseWriter, r *http.Req
 		"track_count": len(tracks),
 		"cover_urls":  covers,
 		"color_index": cp.ColorIndex,
-		"artwork_url": artworkURL,
+		"artwork_url": artworkURLFor(p.cfg.WebDataDir, id, artworkURL),
 	}); err != nil {
 		slog.Error("custom-playlists: failed to write import response", "err", err)
 	}

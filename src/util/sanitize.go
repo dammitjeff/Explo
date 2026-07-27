@@ -20,6 +20,24 @@ func CleanSearchTitle(s string) string {
 	return strings.TrimSpace(s)
 }
 
+var featNamesRe = regexp.MustCompile(`(?i)[\(\[\{]\s*(?:feat\.?|featuring|ft\.?)\s+([^\)\]\}]+)[\)\]\}]`)
+
+// FeatArtists extracts the names from a "(feat. A, B & C)" annotation in a title.
+func FeatArtists(title string) []string {
+	m := featNamesRe.FindStringSubmatch(title)
+	if len(m) < 2 {
+		return nil
+	}
+	list := strings.NewReplacer(" & ", ",", " and ", ",").Replace(m[1])
+	var out []string
+	for _, p := range strings.Split(list, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // NormalizeTitle strips trailing (feat. …) annotations, lowercases,
 // and reduces to alphanumeric-only for fuzzy title comparison.
 func NormalizeTitle(s string) string {

@@ -98,6 +98,9 @@ func (s *Server) registerMiscRoutes() {
 
 	coversDir := filepath.Join(s.cfg.WebDataDir, "cache", "covers")
 	s.mux.Handle("GET /api/covers/", http.StripPrefix("/api/covers/", http.FileServer(http.Dir(coversDir))))
+
+	artworkDir := filepath.Join(s.cfg.WebDataDir, "cache", "playlist_artwork")
+	s.mux.Handle("GET /api/playlist-artwork/", http.StripPrefix("/api/playlist-artwork/", http.FileServer(http.Dir(artworkDir))))
 }
 
 // small helper func for auth routing

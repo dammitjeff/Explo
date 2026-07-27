@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const lbAPIBase = "https://api.listenbrainz.org/1"
@@ -30,6 +31,7 @@ type PlaylistTrack struct {
 	Title      string
 	Artist     string
 	MainArtist string
+	Artists    []string
 	Album      string
 	CoverURL   string
 }
@@ -50,9 +52,7 @@ var validPlaylistTypes = func() map[string]bool {
 }()
 
 func NewPlaylist(cfg app.Config, settings *settings.Settings) *Playlist {
-	return &Playlist{
-		cfg: cfg,
-		settings: settings}
+	return &Playlist{cfg: cfg, settings: settings}
 }
 
 // isValidPlaylistID accepts built-in playlist types and custom-* IDs (blocks path traversal).
@@ -95,17 +95,8 @@ func modelTracksToPlaylistTracks(tracks []*models.Track) []PlaylistTrack {
 // writePlaylistCache downloads cover art and writes a tracklist JSON for the web UI.
 // added maps "CleanTitle|Artist" → true for tracks that made it into the playlist; nil means status unknown.
 func WritePlaylistCache(cfgPath, playlist string, tracks []*models.Track, added map[string]bool) {
-	type cachedTrack struct {
-		Rank      int    `json:"rank"`
-		Title     string `json:"title"`
-		Artist    string `json:"artist"`
-		Release   string `json:"release"`
-		CoverURL  string `json:"coverUrl,omitempty"`
-		CoverPath string `json:"coverPath,omitempty"`
-		InLibrary *bool  `json:"inLibrary,omitempty"`
-	}
 	type cache struct {
-		Tracks []cachedTrack `json:"tracks"`
+		Tracks []CachedTrack `json:"tracks"`
 	}
 
 	coversDir := filepath.Join(cfgPath, "cache", "covers")
@@ -113,22 +104,28 @@ func WritePlaylistCache(cfgPath, playlist string, tracks []*models.Track, added 
 		slog.Error("failed making directory", "msg", err.Error())
 	}
 
-	ct := make([]cachedTrack, len(tracks))
+	ct := make([]CachedTrack, len(tracks))
 	for i, t := range tracks {
-		apiPath, coverPath := util.DownloadCover(t.CoverURL, coversDir)
+		// only re-download genuinely remote covers; already-cached /api/covers paths stay as-is
+		apiPath, coverPath := t.CoverURL, t.CoverPath
+		if strings.HasPrefix(t.CoverURL, "http") {
+			apiPath, coverPath = util.DownloadCover(t.CoverURL, coversDir)
+		}
 		var inLibrary *bool
 		if added != nil {
 			v := added[t.CleanTitle+"|"+t.Artist]
 			inLibrary = &v
 		}
-		ct[i] = cachedTrack{
-			Rank:      i + 1,
-			Title:     t.CleanTitle,
-			Artist:    t.Artist,
-			Release:   t.Album,
-			CoverURL:  apiPath,
-			CoverPath: coverPath,
-			InLibrary: inLibrary,
+		ct[i] = CachedTrack{
+			Rank:       i + 1,
+			Title:      t.CleanTitle,
+			Artist:     t.Artist,
+			MainArtist: t.MainArtist,
+			Artists:    t.Artists,
+			Release:    t.Album,
+			CoverURL:   apiPath,
+			CoverPath:  coverPath,
+			InLibrary:  inLibrary,
 		}
 	}
 
@@ -162,22 +159,25 @@ func lbGet(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-type cachedPrefetchTrack struct {
-	Rank       int    `json:"rank"`
-	Title      string `json:"title"`
-	Artist     string `json:"artist"`
-	MainArtist string `json:"mainArtist,omitempty"`
-	Release    string `json:"release"`
-	CoverURL   string `json:"coverUrl,omitempty"`
-	CoverPath  string `json:"coverPath,omitempty"`
+// CachedTrack is the canonical shape of a track in a playlist cache file.
+type CachedTrack struct {
+	Rank       int      `json:"rank"`
+	Title      string   `json:"title"`
+	Artist     string   `json:"artist"`
+	MainArtist string   `json:"mainArtist,omitempty"`
+	Artists    []string `json:"artists,omitempty"`
+	Release    string   `json:"release"`
+	CoverURL   string   `json:"coverUrl,omitempty"`
+	CoverPath  string   `json:"coverPath,omitempty"`
+	InLibrary  *bool    `json:"inLibrary,omitempty"`
 }
 
 // writePreliminaryCache writes the track cache with remote cover URLs immediately.
 // Returns false if the write fails.
 func writePreliminaryCache(cfgDir, playlistType string, tracks []PlaylistTrack) bool {
-	ct := make([]cachedPrefetchTrack, len(tracks))
+	ct := make([]CachedTrack, len(tracks))
 	for i, t := range tracks {
-		ct[i] = cachedPrefetchTrack{Rank: i + 1, Title: t.Title, Artist: t.Artist, MainArtist: t.MainArtist, Release: t.Album, CoverURL: t.CoverURL}
+		ct[i] = CachedTrack{Rank: i + 1, Title: t.Title, Artist: t.Artist, MainArtist: t.MainArtist, Artists: t.Artists, Release: t.Album, CoverURL: t.CoverURL}
 	}
 	if !writeTrackCache(cfgDir, playlistType, ct) {
 		return false
@@ -194,10 +194,14 @@ func downloadAndCacheCovers(cfgDir, playlistType string, tracks []PlaylistTrack)
 		slog.Error("prefetch: failed to create covers dir", "err", err.Error())
 		return
 	}
-	ct := make([]cachedPrefetchTrack, len(tracks))
+	ct := make([]CachedTrack, len(tracks))
 	for i, t := range tracks {
+		if i > 0 {
+			// space requests so a burst doesn't trip Apple's rate limit
+			time.Sleep(300 * time.Millisecond)
+		}
 		APIPath, coverPath := util.DownloadCover(t.CoverURL, coversDir)
-		ct[i] = cachedPrefetchTrack{Rank: i + 1, Title: t.Title, Artist: t.Artist, MainArtist: t.MainArtist, Release: t.Album, CoverURL: APIPath, CoverPath: coverPath}
+		ct[i] = CachedTrack{Rank: i + 1, Title: t.Title, Artist: t.Artist, MainArtist: t.MainArtist, Artists: t.Artists, Release: t.Album, CoverURL: APIPath, CoverPath: coverPath}
 	}
 	if writeTrackCache(cfgDir, playlistType, ct) {
 		slog.Info("prefetch: cache updated", "playlist", playlistType, "covers", "local")
@@ -319,9 +323,9 @@ func fetchSitewideCovers(coversDir string) string {
 	return ""
 }
 
-func writeTrackCache(cfgDir, playlistType string, tracks []cachedPrefetchTrack) bool {
+func writeTrackCache(cfgDir, playlistType string, tracks []CachedTrack) bool {
 	type cache struct {
-		Tracks []cachedPrefetchTrack `json:"tracks"`
+		Tracks []CachedTrack `json:"tracks"`
 	}
 	raw, err := json.Marshal(cache{Tracks: tracks})
 	if err != nil {
