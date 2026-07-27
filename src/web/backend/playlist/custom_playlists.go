@@ -23,7 +23,6 @@ type CustomPlaylist struct {
 	SourceURL       string    `json:"source_url,omitempty"`       // original URL for dedup + refresh
 	LBMBID          string    `json:"lb_mbid,omitempty"`          // ListenBrainz MBID (backward compat)
 	ArtworkURL      string    `json:"artwork_url,omitempty"`      // playlist cover image (Apple Music)
-	ArtworkUploaded bool      `json:"artwork_uploaded,omitempty"` // true after artwork has been pushed to the music app
 	RefreshDays     int       `json:"refresh_days"`
 	ColorIndex      int       `json:"color_index"`
 	LastFetched     time.Time `json:"last_fetched"`
@@ -41,21 +40,6 @@ func GetCustomPlaylist(cfgDir, id string) *CustomPlaylist {
 		if p.ID == id {
 			cp := p
 			return &cp
-		}
-	}
-	return nil
-}
-
-// MarkCustomPlaylistArtworkUploaded sets ArtworkUploaded=true and persists.
-func MarkCustomPlaylistArtworkUploaded(cfgDir, id string) error {
-	playlists := loadCustomPlaylists(cfgDir)
-	for i := range playlists {
-		if playlists[i].ID == id {
-			if playlists[i].ArtworkUploaded {
-				return nil
-			}
-			playlists[i].ArtworkUploaded = true
-			return saveCustomPlaylists(cfgDir, playlists)
 		}
 	}
 	return nil

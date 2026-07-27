@@ -225,14 +225,15 @@ func main() {
 }
 
 // uploadCustomPlaylistArtwork pushes a custom playlist's cached artwork to the music app
-// after first successful creation. No-op for non-custom playlists, playlists without
-// artwork, or clients that don't support artwork upload (Subsonic, MPD).
+// after each playlist creation (the playlist is recreated every run, so the poster has to
+// be re-applied). No-op for non-custom playlists, playlists without artwork, or clients
+// that don't support artwork upload (Subsonic, MPD).
 func uploadCustomPlaylistArtwork(cfg *config.Config, c *client.Client) {
 	if !strings.HasPrefix(cfg.Flags.Playlist, "custom-") {
 		return
 	}
 	cp := playlist.GetCustomPlaylist(cfg.ServerCfg.WebDataDir, cfg.Flags.Playlist)
-	if cp == nil || cp.ArtworkURL == "" || cp.ArtworkUploaded {
+	if cp == nil || cp.ArtworkURL == "" {
 		return
 	}
 	uploader, ok := c.API.(client.ArtworkUploader)
@@ -246,10 +247,6 @@ func uploadCustomPlaylistArtwork(cfg *config.Config, c *client.Client) {
 	}
 	if err := uploader.SetPlaylistArtwork(path); err != nil {
 		slog.Warn("custom-playlists: failed to upload playlist artwork", "id", cp.ID, "err", err.Error())
-		return
-	}
-	if err := playlist.MarkCustomPlaylistArtworkUploaded(cfg.ServerCfg.WebDataDir, cp.ID); err != nil {
-		slog.Warn("custom-playlists: artwork upload succeeded but flag not persisted", "id", cp.ID, "err", err.Error())
 		return
 	}
 	slog.Info("custom-playlists: playlist artwork uploaded", "id", cp.ID, "system", cfg.System)
