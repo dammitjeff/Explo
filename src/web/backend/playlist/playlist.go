@@ -225,33 +225,58 @@ type sitewideReleasesResp struct {
 	} `json:"payload"`
 }
 
-// randomLocalCoverHiRes picks a random cover from the existing library, ensures a
-// 1200px background version is cached (as {mbid}-bg.jpg), and returns its API URL.
-// Playlist thumbnails are stored at 250px; this fetches full-res on demand from CAA.
+// minBackgroundPx is the smallest edge a cached cover needs to be usable as background art.
+const minBackgroundPx = 600
+
+// localCoverSize returns the dimensions of a cached cover, or 0,0 if it can't be read.
+func localCoverSize(path string) (int, int) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0
+	}
+	defer func() { _ = f.Close() }()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0, 0
+	}
+	return cfg.Width, cfg.Height
+}
+
+// randomLocalCoverHiRes picks a random cached cover to use as background art and returns
+// its API URL. Apple and Spotify covers are already large enough to serve as-is; CAA
+// thumbnails are 250px, so a 1200px version is fetched once and cached as {mbid}-bg.jpg.
 func randomLocalCoverHiRes(coversDir string) string {
 	entries, err := os.ReadDir(coversDir)
 	if err != nil {
 		return ""
 	}
-	var mbids []string
+	var stems []string
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() && strings.HasSuffix(name, ".jpg") && !strings.HasSuffix(name, "-bg.jpg") {
-			mbids = append(mbids, strings.TrimSuffix(name, ".jpg"))
+		if e.IsDir() || !strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, "-bg.jpg") {
+			continue
 		}
+		stems = append(stems, strings.TrimSuffix(name, ".jpg"))
 	}
-	if len(mbids) == 0 {
+	if len(stems) == 0 {
 		return ""
 	}
-	rand.Shuffle(len(mbids), func(i, j int) { mbids[i], mbids[j] = mbids[j], mbids[i] })
-	for _, mbid := range mbids[:min(3, len(mbids))] {
-		bgFile := mbid + "-bg.jpg"
+	rand.Shuffle(len(stems), func(i, j int) { stems[i], stems[j] = stems[j], stems[i] })
+
+	for _, stem := range stems[:min(8, len(stems))] {
+		bgFile := stem + "-bg.jpg"
 		bgPath := filepath.Join(coversDir, bgFile)
 		if _, err := os.Stat(bgPath); err == nil {
 			return "/api/covers/" + bgFile
 		}
-		// Download hi-res from Cover Art Archive using the release MBID
-		resp, err := http.Get("https://coverartarchive.org/release/" + mbid + "/front-1200") //nolint:noctx
+		if w, h := localCoverSize(filepath.Join(coversDir, stem+".jpg")); w >= minBackgroundPx && h >= minBackgroundPx {
+			return "/api/covers/" + stem + ".jpg"
+		}
+		// too small to use directly; only MBID-named covers can be upgraded via CAA
+		if len(stem) != 36 || !lbMBIDRe.MatchString(stem) {
+			continue
+		}
+		resp, err := http.Get("https://coverartarchive.org/release/" + stem + "/front-1200") //nolint:noctx
 		if err != nil || resp.StatusCode != http.StatusOK {
 			if resp != nil {
 				resp.Body.Close() // nolint:errcheck

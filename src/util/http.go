@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"explo/src/logging"
@@ -140,14 +141,25 @@ func DownloadFile(url, destPath string) (string, error) {
 	return destPath, nil
 }
 
+var caaReleaseRe = regexp.MustCompile(`coverartarchive\.org/release/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
+
+// coverID names a cached cover. CAA covers keep their MBID so the background-art
+// picker can still resolve them; other sources hash, having no stable path segment.
+func coverID(url string) string {
+	if m := caaReleaseRe.FindStringSubmatch(url); m != nil {
+		return m[1]
+	}
+	sum := sha1.Sum([]byte(url))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
 // DownloadCover downloads coverURL into coversDir and returns cover api and filesystem path.
 // Returns "" if url is empty.
 func DownloadCover(url, coversDir string) (string, string) {
 	if url == "" {
 		return "", ""
 	}
-	sum := sha1.Sum([]byte(url))
-	id := hex.EncodeToString(sum[:])[:16]
+	id := coverID(url)
 	destPath := filepath.Join(coversDir, id+".jpg")
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
 		if data, err := fetchBytes(url); err != nil {
