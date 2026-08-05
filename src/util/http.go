@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"time"
 
 	"explo/src/logging"
@@ -104,6 +105,10 @@ func fetchBytes(url string) ([]byte, error) {
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
 			lastErr = fmt.Errorf("status %d from %s", resp.StatusCode, url)
+			// a 4xx won't fix itself on retry, but a 429 will
+			if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+				break
+			}
 			continue
 		}
 		data, rerr := io.ReadAll(resp.Body)
@@ -143,6 +148,24 @@ func DownloadFile(url, destPath string) (string, error) {
 
 var caaReleaseRe = regexp.MustCompile(`coverartarchive\.org/release/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
 
+const coverFetchSpacing = 300 * time.Millisecond
+
+var (
+	coverFetchMu   sync.Mutex
+	lastCoverFetch time.Time
+)
+
+// coverThrottle spaces cover downloads so a burst doesn't trip Apple's rate limit.
+// Global, so concurrent playlist imports share one budget.
+func coverThrottle() {
+	coverFetchMu.Lock()
+	defer coverFetchMu.Unlock()
+	if d := coverFetchSpacing - time.Since(lastCoverFetch); d > 0 {
+		time.Sleep(d)
+	}
+	lastCoverFetch = time.Now()
+}
+
 // coverID names a cached cover. CAA covers keep their MBID so the background-art
 // picker can still resolve them; other sources hash, having no stable path segment.
 func coverID(url string) string {
@@ -162,6 +185,7 @@ func DownloadCover(url, coversDir string) (string, string) {
 	id := coverID(url)
 	destPath := filepath.Join(coversDir, id+".jpg")
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
+		coverThrottle()
 		if data, err := fetchBytes(url); err != nil {
 			slog.Warn("cover download failed", "url", url, "err", err.Error())
 		} else if err := os.WriteFile(destPath, data, 0644); err != nil {

@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 const lbAPIBase = "https://api.listenbrainz.org/1"
@@ -196,10 +195,6 @@ func downloadAndCacheCovers(cfgDir, playlistType string, tracks []PlaylistTrack)
 	}
 	ct := make([]CachedTrack, len(tracks))
 	for i, t := range tracks {
-		if i > 0 {
-			// space requests so a burst doesn't trip Apple's rate limit
-			time.Sleep(300 * time.Millisecond)
-		}
 		APIPath, coverPath := util.DownloadCover(t.CoverURL, coversDir)
 		ct[i] = CachedTrack{Rank: i + 1, Title: t.Title, Artist: t.Artist, MainArtist: t.MainArtist, Artists: t.Artists, Release: t.Album, CoverURL: APIPath, CoverPath: coverPath}
 	}
