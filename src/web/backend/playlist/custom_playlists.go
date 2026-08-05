@@ -22,7 +22,7 @@ type CustomPlaylist struct {
 	Source          string    `json:"source"`                     // "listenbrainz" | "apple_music" | "spotify"
 	SourceURL       string    `json:"source_url,omitempty"`       // original URL for dedup + refresh
 	LBMBID          string    `json:"lb_mbid,omitempty"`          // ListenBrainz MBID (backward compat)
-	ArtworkURL      string    `json:"artwork_url,omitempty"`      // playlist cover image (Apple Music)
+	ArtworkURL      string    `json:"artwork_url,omitempty"`      // playlist cover image (Apple Music / Spotify)
 	RefreshDays     int       `json:"refresh_days"`
 	ColorIndex      int       `json:"color_index"`
 	LastFetched     time.Time `json:"last_fetched"`

@@ -704,6 +704,7 @@ func extractTracks(items []partnerItem) []PlaylistTrack {
 			Title:      t.Name,
 			Artist:     fullArtist,
 			MainArtist: mainArtist,
+			Artists:    artists,
 			Album:      t.AlbumOfTrack.Name,
 			CoverURL:   coverURL,
 		})
